@@ -22,7 +22,7 @@ jobs:
         if: github.event_name == 'push'
         run:
             VERSION_IN_CODE=$(poetry version --short)
-            if [ "v$VERSION_IN_CODE" != "${{ github.ref_name }}" ]; then
+            if [ "v$VERSION_IN_CODE" != "$GITHUB_REF_NAME" ]; then
                 echo "Tag does not match the version in pyproject.toml"
                 exit 1
             fi
@@ -31,7 +31,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         run:
             VERSION_IN_CODE=$(poetry version --short)
-            poetry version $VERSION_IN_CODE.dev${{ github.run_number }}+${{ github.sha }}
+            poetry version "$VERSION_IN_CODE.dev$GIHUB_RUN_NUMBER+$GITHUB_SHA"
 
       - name: Build distributions
         run: poetry build
