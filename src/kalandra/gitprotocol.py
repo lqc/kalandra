@@ -5,9 +5,9 @@ See: https://git-scm.com/docs/protocol-v2
 
 """
 
-from typing import NamedTuple
 from collections.abc import Buffer
 from enum import Enum
+from typing import NamedTuple
 
 
 class PacketLineType(Enum):
@@ -50,17 +50,12 @@ class PacketLine:
         if pkt_type is None:
             raise ValueError("Not enough data to determine packet type")
         if pkt_payload_length < 0:
-            raise ValueError(
-                "Not enough data to read the whole packet, need %d more bytes"
-                % -pkt_payload_length
-            )
+            raise ValueError("Not enough data to read the whole packet, need %d more bytes" % -pkt_payload_length)
 
         return cls.from_marker_and_payload(pkt_type, pkt_payload)
 
     @classmethod
-    def from_marker_and_payload(
-        cls, pkt_type: PacketLineType, payload: Buffer | None
-    ) -> "PacketLine":
+    def from_marker_and_payload(cls, pkt_type: PacketLineType, payload: Buffer | None) -> "PacketLine":
         if pkt_type != PacketLineType.DATA:
             return cls(0, b"", pkt_type)
         else:
@@ -75,9 +70,7 @@ class PacketLine:
         return cls(len(encoded), encoded, PacketLineType.DATA)
 
     @classmethod
-    def sniff_buffer(
-        cls, data: Buffer
-    ) -> "tuple[PacketLineType | None, int, Buffer | None]":
+    def sniff_buffer(cls, data: Buffer) -> "tuple[PacketLineType | None, int, Buffer | None]":
         """
         Sniff the buffer to determine the type of packet line and its length.
 
@@ -112,9 +105,7 @@ class PacketLine:
 
     @property
     def marker_bytes(self) -> bytes:
-        return b"%04x" % (
-            self.length + 4 if self.type == PacketLineType.DATA else self.type.value
-        )
+        return b"%04x" % (self.length + 4 if self.type == PacketLineType.DATA else self.type.value)
 
     def __repr__(self) -> str:
         if self.length < 100:
@@ -124,9 +115,7 @@ class PacketLine:
 
 
 PacketLine.FLUSH = PacketLine.from_marker_and_payload(PacketLineType.FLUSH, None)
-PacketLine.DELIMITER = PacketLine.from_marker_and_payload(
-    PacketLineType.DELIMITER, None
-)
+PacketLine.DELIMITER = PacketLine.from_marker_and_payload(PacketLineType.DELIMITER, None)
 
 
 NULL_OBJECT_ID = "0" * 40

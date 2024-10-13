@@ -1,15 +1,18 @@
-from typing import Literal
-from kalandra.gitprotocol import PacketLine
-from .base import (
-    Transport,
-    BaseConnection,
-    FetchConnection,
-    ConnectionException,
-    PushConnection,
-)
-import asyncssh
 import asyncio
 import logging
+from typing import Literal
+
+import asyncssh
+
+from kalandra.gitprotocol import PacketLine
+
+from .base import (
+    BaseConnection,
+    ConnectionException,
+    FetchConnection,
+    PushConnection,
+    Transport,
+)
 
 logger = logging.getLogger(__name__)
 

@@ -1,0 +1,58 @@
+name: verify
+on:
+  pull_request:
+    branches:
+      - main
+
+  push:  # Trigger the job on push to main, so build caches are updated
+    branches:
+      - main
+
+permissions:
+  contents: read
+  checks: write
+  packages: read
+
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+      - uses: pre-commit/action@v3.0.1
+
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+      - name: Set poetry cache to a known location
+        run: echo "export POETRY_CACHE_DIR=${{ runner.temp }}/poetry-cache" >> $GITHUB_ENV
+      - name: Install poetry
+        uses: abatilo/actions-poetry@v3
+      - name: Cache dependencies
+        uses: actions/cache@v3
+        with:
+          path: ${{ env.POETRY_CACHE_DIR }}
+          key: ${{ runner.os }}-poetry-${{ hashFiles('poetry.lock') }}
+
+      - name: Install dependencies
+        run: poetry install
+
+      - name: Run tests
+        run: poetry run pytest --cov=src tests/
+
+      - name: Publish Test Report
+        uses: mikepenz/action-junit-report@v4
+        if: success() || failure() # always run even if the previous step fails
+        with:
+          report_paths: '**/*-results.xml'
+          require_passed_tests: true
+          detailed_summary: true
+          follow_symlink: true
+          include_passed: true

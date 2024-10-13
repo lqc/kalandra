@@ -1,9 +1,10 @@
-from typing import AsyncIterator, Iterable
+import itertools
+import logging
 from abc import ABCMeta, abstractmethod
 from asyncio import IncompleteReadError, StreamReader, StreamWriter
+from typing import AsyncIterator, Iterable
+
 from aiofiles.threadpool.binary import AsyncBufferedIOBase
-import logging
-import itertools
 
 from kalandra.gitprotocol import PacketLine, PacketLineType, Ref, RefChange
 
@@ -96,9 +97,7 @@ class BaseConnection[T: Transport]:
                 yield packet
             except IncompleteReadError as e:
                 if len(e.partial) > 0:
-                    raise ValueError(
-                        f"Unexpected EOF while reading packet length: {e.partial}"
-                    )
+                    raise ValueError(f"Unexpected EOF while reading packet length: {e.partial}")
                 raise ValueError("Reached EOF before FLUSH packet") from e
 
     async def _read_packets_section(self) -> AsyncIterator[PacketLine]:
@@ -116,9 +115,7 @@ class BaseConnection[T: Transport]:
                 yield packet
             except IncompleteReadError as e:
                 if len(e.partial) > 0:
-                    raise ValueError(
-                        f"Unexpected EOF while reading packet length: {e.partial}"
-                    )
+                    raise ValueError(f"Unexpected EOF while reading packet length: {e.partial}")
                 raise ValueError("Reached EOF before FLUSH packet") from e
 
     async def _write_packet(self, packet: PacketLine) -> None:
@@ -170,9 +167,7 @@ class BaseConnection[T: Transport]:
         section = self._read_packets_section()
         version_data = await self._read_header_packet(section)
         if version_data != "version 1":
-            raise ValueError(
-                f"Expected 'version 1' packet, instead got: {version_data}"
-            )
+            raise ValueError(f"Expected 'version 1' packet, instead got: {version_data}")
 
         refs: dict[str, str] = {}
 
@@ -255,9 +250,7 @@ class FetchConnection[T: Transport](BaseConnection[T]):
                 continue
             yield ref
 
-    async def _process_ack_section(
-        self, ack_section: AsyncIterator[PacketLine], missing_objects: set[str]
-    ):
+    async def _process_ack_section(self, ack_section: AsyncIterator[PacketLine], missing_objects: set[str]):
         async for ack in ack_section:
             if ack.data == b"nak\n":
                 break
@@ -272,9 +265,7 @@ class FetchConnection[T: Transport](BaseConnection[T]):
 
         assert self.last_packet, "Expected last packet to be set"
         if self.last_packet.type == PacketLineType.FLUSH:
-            raise ConnectionException(
-                "Server negotiation failed. Missing objects: %s" % (missing_objects,)
-            )
+            raise ConnectionException("Server negotiation failed. Missing objects: %s" % (missing_objects,))
 
     async def send_fetch_request(
         self,
@@ -290,9 +281,7 @@ class FetchConnection[T: Transport](BaseConnection[T]):
 
         have_args = ("have " + obj for obj in have) if have else ()
         want_args = ("want " + obj for obj in objects)
-        await self._send_command_v2(
-            "fetch", args=itertools.chain(base_args, have_args, want_args, ("done",))
-        )
+        await self._send_command_v2("fetch", args=itertools.chain(base_args, have_args, want_args, ("done",)))
 
         # NOTE: we always send the "done" immediately not waiting for the server to send us the acks
         #       as we can't really do anything with missing objects anyway
@@ -343,9 +332,7 @@ class FetchConnection[T: Transport](BaseConnection[T]):
 
         assert self.last_packet, "Expected last packet to be set"
         if self.last_packet.type != PacketLineType.FLUSH:  # type: ignore
-            logger.warning(
-                f"Unexpected packet type at end of packfile: {self.last_packet.type}"
-            )
+            logger.warning(f"Unexpected packet type at end of packfile: {self.last_packet.type}")
 
 
 class PushConnection[T: Transport](BaseConnection[T]):
@@ -403,9 +390,7 @@ class PushConnection[T: Transport](BaseConnection[T]):
             return True
         return False
 
-    async def send_change_request(
-        self, changes: list[RefChange], packfile: AsyncBufferedIOBase
-    ) -> None:
+    async def send_change_request(self, changes: list[RefChange], packfile: AsyncBufferedIOBase) -> None:
         """
         Send a change request to the server.
 
@@ -426,9 +411,7 @@ class PushConnection[T: Transport](BaseConnection[T]):
         for change in changes:
             if change.is_delete:
                 if not supports_delete:
-                    logger.warning(
-                        f"Server does not support delete-refs capability, skipping delete of {change.ref}"
-                    )
+                    logger.warning(f"Server does not support delete-refs capability, skipping delete of {change.ref}")
                     continue
             else:
                 has_non_deletes = True
