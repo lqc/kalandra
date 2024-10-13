@@ -1,8 +1,9 @@
-from typing import Literal
-from .base import Transport, BaseConnection, FetchConnection, PushConnection
 import asyncio
-from pathlib import Path
 import logging
+from pathlib import Path
+from typing import Literal
+
+from .base import BaseConnection, FetchConnection, PushConnection, Transport
 
 logger = logging.getLogger(__name__)
 
@@ -24,9 +25,7 @@ class FileConnection(BaseConnection["FileTransport"]):
         )
 
         if self.process.returncode is not None:
-            logger.error(
-                f"Failed to start process {service_name}: {self.process} / {self.process.returncode}"
-            )
+            logger.error(f"Failed to start process {service_name}: {self.process} / {self.process.returncode}")
             raise RuntimeError(f"Failed to start process {service_name}")
 
         assert self.process.stdout is not None
@@ -66,9 +65,7 @@ class FileTransport(Transport):
 
         objects = self.path / "objects"
         if not objects.is_dir():
-            raise FileNotFoundError(
-                f"Dir {self.path} doesn't look like a git repository"
-            )
+            raise FileNotFoundError(f"Dir {self.path} doesn't look like a git repository")
 
     @classmethod
     def can_handle_url(cls, url: str) -> bool:

@@ -1,9 +1,9 @@
-import asyncio
 import argparse
+import asyncio
 import logging
 
-from .transports import Transport
 from .commands.update_mirror import update_mirror
+from .transports import Transport
 
 logger = logging.getLogger(__name__)
 

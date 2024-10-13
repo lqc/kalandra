@@ -1,15 +1,15 @@
-from typing import AsyncIterator
-from ..transports import Transport
-from ..gitprotocol import Ref, RefChange, NULL_OBJECT_ID
 import logging
+from typing import AsyncIterator
+
 import aiofiles
+
+from kalandra.gitprotocol import NULL_OBJECT_ID, Ref, RefChange
+from kalandra.transports import Transport
 
 logger = logging.getLogger(__name__)
 
 
-async def calculate_mirror_updates(
-    mirror_refs: dict[str, str], upstream_refs: AsyncIterator[Ref]
-):
+async def calculate_mirror_updates(mirror_refs: dict[str, str], upstream_refs: AsyncIterator[Ref]):
     """
     Calculate the updates that need to be pushed to the mirror.
     """
@@ -45,12 +45,7 @@ async def update_mirror(
         upstream.fetch() as upstream_conn,
         mirror.push() as mirror_conn,
     ):
-        changes = [
-            c
-            async for c in calculate_mirror_updates(
-                mirror_conn.refs, upstream_conn.ls_refs()
-            )
-        ]
+        changes = [c async for c in calculate_mirror_updates(mirror_conn.refs, upstream_conn.ls_refs())]
 
         if not changes:
             logger.info("No changes detected")
@@ -64,17 +59,13 @@ async def update_mirror(
             return
 
         # Fetch objects from upstream
-        async with aiofiles.tempfile.NamedTemporaryFile(
-            suffix=".pack", encoding=None
-        ) as packfile:
+        async with aiofiles.tempfile.NamedTemporaryFile(suffix=".pack", encoding=None) as packfile:
             new_objects = {change.new for change in changes}
             new_objects.discard(NULL_OBJECT_ID)
             have_objects = set(mirror_conn.refs.values())
 
             logger.info("Fetching objects from upstream")
-            await upstream_conn.send_fetch_request(
-                new_objects, have=have_objects, output=packfile
-            )
+            await upstream_conn.send_fetch_request(new_objects, have=have_objects, output=packfile)
 
             # Push objects to mirror
             await packfile.seek(0)

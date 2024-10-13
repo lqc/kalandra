@@ -1,4 +1,4 @@
-from .base import Transport, BaseConnection, FetchConnection
+from .base import BaseConnection, FetchConnection, Transport
 
 # Import all the transports so they can be used
 from .file import FileTransport

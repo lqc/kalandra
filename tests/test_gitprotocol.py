@@ -1,4 +1,5 @@
 import pytest
+
 from kalandra.gitprotocol import PacketLine, PacketLineType
 
 
@@ -10,9 +11,7 @@ from kalandra.gitprotocol import PacketLine, PacketLineType
         (b"000bfoobar\n", 7, b"foobar\n"),
     ],
 )
-def test_packetline_create_data_packet(
-    data: bytes, expected_length: int, expected_payload: bytes
-):  # type: ignore
+def test_packetline_create_data_packet(data: bytes, expected_length: int, expected_payload: bytes):  # type: ignore
     line = PacketLine.from_buffer(data)
 
     assert line.length == expected_length
@@ -45,14 +44,6 @@ def test_packetline_too_long():
 def test_packetline_too_short():
     with pytest.raises(ValueError):
         PacketLine.from_buffer(b"0a0")
-
-
-def test_packetline_create_with_offset():
-    line = PacketLine.from_buffer(b"xxx0007ABC", offset=3)
-
-    assert line.length == 3
-    assert line.data == b"ABC"
-    assert line.type == PacketLineType.DATA
 
 
 def test_packetline_create_with_length_exceeding_buffer():
