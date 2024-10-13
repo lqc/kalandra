@@ -27,13 +27,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version-file: .python-version
 
       - name: Set poetry cache to a known location
-        run: echo "POETRY_CACHE_DIR=${{ runner.temp }}/poetry-cache" >> $GITHUB_ENV
+        run: |
+          echo "POETRY_CACHE_DIR=${RUNNER_TEMP}/poetry-cache" >> $GITHUB_ENV
 
       - name: Install poetry
         uses: abatilo/actions-poetry@v3
