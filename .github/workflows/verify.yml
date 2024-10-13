@@ -35,7 +35,7 @@ jobs:
 
       - name: Set poetry cache to a known location
         run: |
-          echo "POETRY_CACHE_DIR=${RUNNER_TEMP}/poetry-cache" >> $GITHUB_ENV
+          echo "POETRY_CACHE_DIR=$RUNNER_TEMP/poetry-cache" >> "$GITHUB_ENV"
 
       - name: Install poetry
         uses: abatilo/actions-poetry@v3
