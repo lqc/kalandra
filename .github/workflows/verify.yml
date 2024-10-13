@@ -40,6 +40,10 @@ jobs:
       - name: Install poetry
         uses: abatilo/actions-poetry@v3
 
+      - name: Export poetry Python binary to path
+        run: |
+          echo "$(poetry env info --path)/bin" >> $GITHUB_PATH
+
       - name: Cache dependencies
         uses: actions/cache@v3
         with:
@@ -51,6 +55,11 @@ jobs:
 
       - name: Run tests
         run: poetry run pytest --cov=src -vv --junit-xml=build/e2e-test-results.xml
+
+      - name: Type checking
+        uses: jakebailey/pyright-action@v2
+        with:
+          pylance-version: latest-release
 
       - name: Publish Test Report
         uses: mikepenz/action-junit-report@v4
