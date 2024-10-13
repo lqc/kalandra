@@ -1,5 +1,8 @@
 name: publish
 on:
+  push:
+    tags:
+      - 'v*.*.*'
   workflow_dispatch:
 
 jobs:
@@ -12,9 +15,23 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version-file: .python-version
-
       - name: Install poetry
         uses: abatilo/actions-poetry@v3
+
+      - name: Check if tag matches the version
+        if: github.event_name == 'push'
+        run:
+            VERSION_IN_CODE=$(poetry version --short)
+            if [ "v$VERSION_IN_CODE" != "${{ github.ref_name }}" ]; then
+                echo "Tag does not match the version in pyproject.toml"
+                exit 1
+            fi
+
+      - name: Override version to a snapshot version
+        if: github.event_name == 'workflow_dispatch'
+        run:
+            VERSION_IN_CODE=$(poetry version --short)
+            poetry version $VERSION_IN_CODE.dev${{ github.run_number }}+${{ github.sha }}
 
       - name: Build distributions
         run: poetry build
@@ -41,3 +58,6 @@ jobs:
 
       - name: Publish release distributions to PyPI
         uses: pypa/gh-action-pypi-publish@v1.10.3
+        with:
+            print-hash: true
+            attestations: true
