@@ -42,10 +42,10 @@ jobs:
           key: ${{ runner.os }}-poetry-${{ hashFiles('poetry.lock') }}
 
       - name: Install dependencies
-        run: poetry install
+        run: poetry install --with dev
 
       - name: Run tests
-        run: poetry run pytest --cov=src tests/
+        run: poetry run pytest --cov=src -vv --junit-xml=build/e2e-test-results.xml
 
       - name: Publish Test Report
         uses: mikepenz/action-junit-report@v4
