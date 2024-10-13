@@ -31,7 +31,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         run: |
             VERSION_IN_CODE=$(poetry version --short)
-            poetry version "$VERSION_IN_CODE.dev$GIHUB_RUN_NUMBER+$GITHUB_SHA"
+            poetry version "$VERSION_IN_CODE.dev${GITHUB_RUN_NUMBER}"
 
       - name: Build distributions
         run: poetry build
