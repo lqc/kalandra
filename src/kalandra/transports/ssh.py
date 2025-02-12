@@ -88,7 +88,7 @@ class SSHTransport(Transport):
         address, self.path = url[6:].split("/", 1)
         self.user, host = address.split("@", 1)
 
-        print("HOST:", host)
+        logger.debug("Resolved SSH host:", host)
 
         if ":" in host:
             self.host, port = host.split(":", 1)
