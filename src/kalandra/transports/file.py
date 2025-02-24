@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Literal
 
 from .base import BaseConnection, FetchConnection, PushConnection, Transport
+from .credentials import CredentialProvider
 
 logger = logging.getLogger(__name__)
 
@@ -54,10 +55,9 @@ class FilePushConnection(FileConnection, PushConnection["FileTransport"]):
 
 
 class FileTransport(Transport):
-    def __init__(self, path: str | Path):
-        if isinstance(path, str):
-            assert path.startswith("file://")
-            path = Path(path[7:])
+    def __init__(self, *, url: str, credentials_provider: CredentialProvider):
+        assert url.startswith("file://")
+        path = Path(url[7:])
 
         self.path = path.resolve()
         if not self.path.is_dir():
@@ -66,6 +66,8 @@ class FileTransport(Transport):
         objects = self.path / "objects"
         if not objects.is_dir():
             raise FileNotFoundError(f"Dir {self.path} doesn't look like a git repository")
+
+        super().__init__(url=path.as_uri(), credentials_provider=credentials_provider)
 
     @classmethod
     def can_handle_url(cls, url: str) -> bool:

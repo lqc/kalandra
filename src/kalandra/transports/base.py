@@ -8,6 +8,8 @@ from aiofiles.threadpool.binary import AsyncBufferedIOBase
 
 from kalandra.gitprotocol import PacketLine, PacketLineType, Ref, RefChange
 
+from .credentials import CredentialProvider
+
 logger = logging.getLogger(__name__)
 
 
@@ -16,8 +18,9 @@ class ConnectionException(Exception):
 
 
 class Transport(metaclass=ABCMeta):
-    def __init__(self, url: str):
-        self.url = url
+    def __init__(self, *, url: str, credentials_provider: CredentialProvider):
+        self._url = url
+        self.credentials_provider = credentials_provider
 
     @abstractmethod
     def fetch[T: Transport](self: T) -> "FetchConnection[T]":
@@ -33,6 +36,13 @@ class Transport(metaclass=ABCMeta):
         """
         pass
 
+    @property
+    def url(self) -> str:
+        return self._url
+
+    async def get_credentials(self, origin: str) -> tuple[str, str] | None:
+        return await self.credentials_provider.get_credentials(origin)
+
     @classmethod
     @abstractmethod
     def can_handle_url(cls, url: str) -> bool:
@@ -42,13 +52,14 @@ class Transport(metaclass=ABCMeta):
         return False
 
     @classmethod
-    def from_url(cls, url: str) -> "Transport":
+    def from_url(cls, url: str, *, credentials_provider: CredentialProvider) -> "Transport":
         """
         Create a transport instance from a URL.
         """
+        assert credentials_provider is not None, "Credentials provider is required"
         for cls in cls.__subclasses__():
             if cls.can_handle_url(url):
-                return cls(url)
+                return cls(url=url, credentials_provider=credentials_provider)
         raise ValueError(f"Unsupported URL: {url}")
 
 
@@ -163,15 +174,22 @@ class BaseConnection[T: Transport]:
 
         The first ref packet is special as it contains the capabilities of the server.
         """
+        refs: dict[str, str] = {}
+
         # Read the capabilities from the server (https://git-scm.com/docs/protocol-v2#_capability_advertisement)
         section = self._read_packets_section()
         version_data = await self._read_header_packet(section)
-        if version_data != "version 1":
-            raise ValueError(f"Expected 'version 1' packet, instead got: {version_data}")
+        if not version_data.startswith("version "):
+            # No version info, fallback to version 0
+            self.git_protocol = ""
+            # In protocol 0, the first packet is the first ref
+            first_ref_extended = version_data
+        else:
+            if version_data != "version 1":
+                raise ValueError(f"Expected 'version 1' packet, instead got: {version_data}")
+            # read next packet
+            first_ref_extended = await self._read_header_packet(section)
 
-        refs: dict[str, str] = {}
-
-        first_ref_extended = await self._read_header_packet(section)
         first_ref_data, capabilities_list = first_ref_extended.split("\x00", 1)
         first_ref = Ref.from_line(first_ref_data)
         refs[first_ref.name] = first_ref.object_id

@@ -13,6 +13,7 @@ from .base import (
     PushConnection,
     Transport,
 )
+from .credentials import CredentialProvider
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +24,7 @@ class SSHConnection(BaseConnection["SSHTransport"]):
     async def _open_service_connection(
         self, service_name: Literal["git-upload-pack", "git-receive-pack"]
     ) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
-        logger.debug("Connecting to %s", self.transport.path)
+        logger.debug("Connecting to %s", self.transport.url)
 
         options = asyncssh.SSHClientConnectionOptions(
             # ignore_encrypted=False,
@@ -83,8 +84,10 @@ class SSHPushConnection(SSHConnection, PushConnection["SSHTransport"]):
 
 
 class SSHTransport(Transport):
-    def __init__(self, url: str):
+    def __init__(self, *, url: str, credentials_provider: CredentialProvider):
         assert url.startswith("ssh://")
+        super().__init__(url=url, credentials_provider=credentials_provider)
+
         address, self.path = url[6:].split("/", 1)
         self.user, host = address.split("@", 1)
 

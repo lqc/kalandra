@@ -1,9 +1,11 @@
 import asyncio
 import logging
-from typing import AsyncGenerator, Iterable, Literal
+from typing import Iterable, Literal
 from urllib.parse import urlparse, urlunsplit
 
 import aiohttp
+
+from kalandra.stream_utils import BytesStreamWriter
 
 from .base import (
     BaseConnection,
@@ -12,33 +14,11 @@ from .base import (
     PushConnection,
     Transport,
 )
+from .credentials import CredentialProvider
 
 logger = logging.getLogger(__name__)
 
-
-class BytesStream:
-    def __init__(self):
-        self._buffer = bytearray()
-        self._is_eof = False
-
-    def write(self, data: bytes) -> None:
-        assert not self._is_eof, "Cannot write to a closed stream"
-        self._buffer.extend(data)
-
-    async def drain(self) -> None:
-        pass
-
-    def can_write_eof(self) -> bool:
-        return True
-
-    def write_eof(self) -> None:
-        self._is_eof = True
-
-    async def wait_closed(self) -> None:
-        pass
-
-    def getvalue(self) -> bytes:
-        return bytes(self._buffer)
+type SessionFactory = type[aiohttp.ClientSession]
 
 
 class HTTPSmartConnection(BaseConnection["HTTPTransport"]):
@@ -48,16 +28,22 @@ class HTTPSmartConnection(BaseConnection["HTTPTransport"]):
     async def _open_service_connection(
         self, service_name: Literal["git-upload-pack", "git-receive-pack"]
     ) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
-        self._session = aiohttp.ClientSession()
+        origin = urlparse(self.transport.url).hostname
+        assert origin is not None, "No hostname in service URL"
+        logger.debug("Getting credentials for %s", origin)
+        credentials = await self.transport.get_credentials(origin)
+
+        self._session = self.transport.session_factory(
+            auth=aiohttp.BasicAuth(*credentials) if credentials else None,
+            headers={"Git-Protocol": self.git_protocol},
+        )
 
         # As per https://git-scm.com/docs/gitprotocol-http#_url_format
         service_url = self.transport.url + f"/info/refs?service={service_name}"
 
-        logger.debug("Connecting to %s", service_url)
-        hello_resp = await self._session.get(
-            service_url,
-            headers={"Git-Protocol": "version=2"},
-        )
+        logger.debug("Connecting to %s, protocol %s", service_url, self.git_protocol)
+
+        hello_resp = await self._session.get(service_url, headers={"Git-Protocol": self.git_protocol})
 
         if hello_resp.status != 200:
             raise ConnectionException(f"Unexpected status code: {hello_resp.status}")
@@ -94,7 +80,7 @@ class HTTPSmartConnection(BaseConnection["HTTPTransport"]):
         assert self.writer is None
         assert self._session is not None
 
-        buffer = self.writer = BytesStream()
+        buffer = self.writer = BytesStreamWriter()
         await super()._send_command_v2(command, args, **capabilities)
         self.writer = None
 
@@ -103,7 +89,6 @@ class HTTPSmartConnection(BaseConnection["HTTPTransport"]):
         logger.debug("Sending command to %s", url)
         resp = await self._session.post(
             url,
-            headers={"Git-Protocol": "version=2"},
             data=buffer.getvalue(),
         )
 
@@ -119,16 +104,26 @@ class HTTPSmartFetchConnection(HTTPSmartConnection, FetchConnection["HTTPTranspo
 
 
 class HTTPSmartPushConnection(HTTPSmartConnection, PushConnection["HTTPTransport"]):
-    pass
+    async def _open_push_service_connection(self) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+        return await self._open_service_connection("git-receive-pack")
 
 
 class HTTPTransport(Transport):
-    def __init__(self, url: str):
+    def __init__(
+        self,
+        *,
+        url: str,
+        credentials_provider: CredentialProvider,
+        session_factory: SessionFactory = aiohttp.ClientSession,
+    ):
+        super().__init__(url=url, credentials_provider=credentials_provider)
+
         parsed = urlparse(url)
         self.user = parsed.username
         self.host = parsed.hostname
         self.port = parsed.port or 443
         self.path = parsed.path
+        self._session_factory = session_factory
 
     @classmethod
     def can_handle_url(cls, url: str) -> bool:
@@ -143,3 +138,7 @@ class HTTPTransport(Transport):
     @property
     def url(self) -> str:
         return urlunsplit(("https", f"{self.host}", self.path, "", ""))
+
+    @property
+    def session_factory(self) -> SessionFactory:
+        return self._session_factory
