@@ -91,7 +91,7 @@ class HTTPSmartConnection(BaseConnection["HTTPTransport"]):
         assert self.writer is None
         assert self._session is not None
 
-        buffer = self.writer = BytesStreamWriter()
+        buffer = self.writer = BytesStreamWriter()  # type: ignore
         await super()._send_command_v2(command, args, **capabilities)
         self.writer = None
 
