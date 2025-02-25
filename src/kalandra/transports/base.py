@@ -99,6 +99,11 @@ class BaseConnection[T: Transport]:
             return PacketLine.from_marker_and_payload(pkt_type, None)
 
     async def _read_packets_until_flush(self) -> AsyncIterator[PacketLine]:
+        assert self.reader is not None
+
+        if self.reader.at_eof():
+            return
+
         while True:
             try:
                 packet = await self._read_packet()
@@ -408,54 +413,73 @@ class PushConnection[T: Transport](BaseConnection[T]):
             return True
         return False
 
-    async def send_change_request(self, changes: list[RefChange], packfile: AsyncBufferedIOBase) -> None:
-        """
-        Send a change request to the server.
-
-        @see: https://git-scm.com/docs/gitprotocol-pack#_pushing_data_to_a_server
-        """
-        assert self.writer is not None
-
+    async def _generate_receive_commands(
+        self,
+        changes: list[RefChange],
+        supports_delete: bool,
+        use_capabilties: set[str],
+    ) -> AsyncIterator[PacketLine]:
         first = True
-        use_capabilties: set[str] = set()
-
-        # add any report-status capability if supported
-        self.add_capability_if_supported(use_capabilties, "report-status")
-
-        supports_delete = "delete-refs" in self.capabilities
-
-        has_non_deletes = False
 
         for change in changes:
             if change.is_delete:
                 if not supports_delete:
                     logger.warning(f"Server does not support delete-refs capability, skipping delete of {change.ref}")
                     continue
-            else:
-                has_non_deletes = True
 
             line = f"{change.old} {change.new} {change.ref}"
             if first:
                 line += "\0" + " ".join(use_capabilties)
                 first = False
-            await self._write_packet(PacketLine.data_from_string(line))
+            yield PacketLine.data_from_string(line)
+        yield PacketLine.FLUSH
 
-        # The command is terminated with a flush packet
-        await self._write_packet(PacketLine.FLUSH)
+    async def _push_request_v1(
+        self, changes: list[RefChange], packfile: AsyncBufferedIOBase | None
+    ) -> tuple[frozenset[str], AsyncIterator[PacketLine], AsyncBufferedIOBase | None]:
+        """
+        Prepare the push request
+        """
+        use_capabilties: set[str] = set()
 
-        if not has_non_deletes:
-            logger.info("No non-delete changes to send, skipping packfile")
-            return
+        # add any report-status capability if supported
+        self.add_capability_if_supported(use_capabilties, "report-status")
+        self.add_capability_if_supported(use_capabilties, "side-band-64k")
+        supports_delete = "delete-refs" in self.capabilities
 
-        # Send the packfile
-        logger.info("Sending packfile")
+        packets = self._generate_receive_commands(changes, supports_delete, use_capabilties)
+        has_non_deletes = any(not change.is_delete for change in changes)
+
+        return frozenset(use_capabilties), packets, packfile if has_non_deletes else None
+
+    async def _send_packfile(self, packfile: AsyncBufferedIOBase) -> None:
+        assert self.writer is not None
         await packfile.seek(0)
         async for chunk in packfile:
             self.writer.write(chunk)
             await self.writer.drain()
 
+    async def _send_commands(self, packets: AsyncIterator[PacketLine], packfile: AsyncBufferedIOBase | None) -> None:
+        assert self.writer is not None
+
+        async for packet in packets:
+            await self._write_packet(packet)
+
+        if packfile is not None:
+            await self._send_packfile(packfile)
+
+    async def send_change_request(self, changes: list[RefChange], packfile: AsyncBufferedIOBase | None) -> None:
+        """
+        Send a change request to the server.
+
+        @see: https://git-scm.com/docs/gitprotocol-pack#_pushing_data_to_a_server
+        """
+        used_capabilities, packets, packfile_to_send = await self._push_request_v1(changes, packfile)
+
+        await self._send_commands(packets, packfile_to_send)
+
         # Try to read the report-status
-        if "report-status" in use_capabilties:
+        if "report-status" in used_capabilities:
             logger.info("Reading report-status")
             async for packet in self._read_packets_until_flush():
                 assert packet.type == PacketLineType.DATA

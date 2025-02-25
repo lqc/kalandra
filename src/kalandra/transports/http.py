@@ -1,10 +1,12 @@
 import asyncio
 import logging
-from typing import Iterable, Literal
+from typing import AsyncIterator, Iterable, Literal
 from urllib.parse import urlparse, urlunsplit
 
 import aiohttp
+from aiofiles.threadpool.binary import AsyncBufferedIOBase
 
+from kalandra.gitprotocol import PacketLine
 from kalandra.stream_utils import BytesStreamWriter
 
 from .base import (
@@ -106,6 +108,38 @@ class HTTPSmartFetchConnection(HTTPSmartConnection, FetchConnection["HTTPTranspo
 class HTTPSmartPushConnection(HTTPSmartConnection, PushConnection["HTTPTransport"]):
     async def _open_push_service_connection(self) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
         return await self._open_service_connection("git-receive-pack")
+
+    async def _send_commands(self, packets: AsyncIterator[PacketLine], packfile: AsyncBufferedIOBase | None) -> None:
+        """
+        As per <https://git-scm.com/docs/http-protocol#_smart_service_git_receive_pack>, the client must
+        make a new POST request directly to the service URL.
+        """
+        assert self._session is not None, "HTTP session not initialized"
+        assert self.writer is None
+
+        async def generate_command_data():
+            async for pkt in packets:
+                yield pkt.data
+                logger.debug("Sending packet: %r", pkt)
+
+            if packfile is not None:
+                await packfile.seek(0)
+                async for chunk in packfile:
+                    yield chunk
+
+        # Send a new HTTP POST request with the command
+        url = self.transport.url + f"/{self._service}"
+        logger.debug("Sending command to %s", url)
+        response = await self._session.post(
+            url,
+            headers={"Content-Type": f"application/x-{self._service}-request"},
+            data=generate_command_data(),
+        )
+        if response.status != 200:
+            raise ConnectionException(f"Unexpected status code: {response.status}")
+        logger.debug("Push response headers: %s", response.headers)
+
+        self.reader = response.content  # type: ignore
 
 
 class HTTPTransport(Transport):
