@@ -6,7 +6,7 @@ from urllib.parse import urlparse, urlunsplit
 import aiohttp
 from aiofiles.threadpool.binary import AsyncBufferedIOBase
 
-from kalandra.gitprotocol import PacketLine
+from kalandra.gitprotocol import PacketLine, PacketLineType
 from kalandra.stream_utils import BytesStreamWriter
 
 from .base import (
@@ -44,7 +44,6 @@ class HTTPSmartConnection(BaseConnection["HTTPTransport"]):
         service_url = self.transport.url + f"/info/refs?service={service_name}"
 
         logger.debug("Connecting to %s, protocol %s", service_url, self.git_protocol)
-
         hello_resp = await self._session.get(service_url, headers={"Git-Protocol": self.git_protocol})
 
         if hello_resp.status != 200:
@@ -58,14 +57,17 @@ class HTTPSmartConnection(BaseConnection["HTTPTransport"]):
         self._service = service_name
         self.reader = hello_resp.content  # type: ignore
 
-        header = None
-        async for pkt in self._read_packets_until_flush():
-            if header is not None:
-                raise ConnectionException("Unexpected packet after header: %r" % pkt)
-            header = pkt
-        assert header is not None, "No header received"
+        header = await self._read_packet()
         if header.data != f"# service={service_name}\n".encode("ascii"):
-            raise ConnectionException(f"Unexpected service: {header}")
+            if service_name == "git-upload-pack" and header.data == b"version 2":
+                # JGit servers do not send the service name, but they do send the version immediately
+                logger.warning("JGit server did not send service name, assuming git-upload-pack")
+                self.shift_packet(header)
+            else:
+                raise ConnectionException(f"Smart protocol requires service header, instead got: {header}")
+        else:
+            pkt = await self._read_packet()
+            assert pkt.type == PacketLineType.FLUSH, "Expected flush after service header, got %r" % pkt
 
         return hello_resp.content, None  # type: ignore
 

@@ -95,3 +95,63 @@ async def test_http_push_connection_hello_v0():
             "refs/heads/main": "f8355e1c8022fb6825c0d901c5d8617297ff626e",
             "refs/meta/config": "28d140655d50e594417908cf4193e4387d05f6ff",
         }
+
+
+GITHUB_UPLOAD_HELLO = b"""001e# service=git-upload-pack
+0000000eversion 2
+0022agent=git/github-d6c9584635a2
+0013ls-refs=unborn
+0027fetch=shallow wait-for-done filter
+0012server-option
+0017object-format=sha1
+0000"""
+
+
+# JGit/Gerrit incorrectly omits the '# service=git-upload-pack' line
+# https://github.com/eclipse-jgit/jgit/blob/68f454af418224b1ba654337c073bfb06cfb16c6/org.eclipse.jgit/src/org/eclipse/jgit/transport/TransportHttp.java#L1337
+GERRIT_UPLOAD_HELLO = (
+    b"000dversion 2000bls-refs0011fetch=shallow0011server-option0033agent=JGit/v6.10.0.202406032230-r-73-gd5cc102e70000"
+)
+
+
+@pytest.mark.asyncio
+async def test_http_fetch_connection_hello():
+    session_factory = mock_session(
+        MockResponse.create(200, {"Content-Type": "application/x-git-upload-pack-advertisement"}, GITHUB_UPLOAD_HELLO),
+    )
+
+    transport = HTTPTransport(
+        url="http://example.test/repo.git",
+        credentials_provider=StaticCredentialProvider("john", "pass"),
+        session_factory=session_factory,
+    )
+
+    async with transport.fetch() as connection:
+        assert connection.capabilities == {
+            "ls-refs=unborn",
+            "fetch=shallow wait-for-done filter",
+            "object-format=sha1",
+            "server-option",
+            "agent=git/github-d6c9584635a2",
+        }
+
+
+@pytest.mark.asyncio
+async def test_http_fetch_connection_hello_gerrit():
+    session_factory = mock_session(
+        MockResponse.create(200, {"Content-Type": "application/x-git-upload-pack-advertisement"}, GERRIT_UPLOAD_HELLO),
+    )
+
+    transport = HTTPTransport(
+        url="http://example.test/repo.git",
+        credentials_provider=StaticCredentialProvider("john", "pass"),
+        session_factory=session_factory,
+    )
+
+    async with transport.fetch() as connection:
+        assert connection.capabilities == {
+            "ls-refs",
+            "fetch=shallow",
+            "server-option",
+            "agent=JGit/v6.10.0.202406032230-r-73-gd5cc102e7",
+        }

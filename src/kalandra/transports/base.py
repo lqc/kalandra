@@ -79,6 +79,8 @@ class BaseConnection[T: Transport]:
         self.git_protocol = ""
         self.last_packet: PacketLine | None = None
 
+        self._shifted_packets: list[PacketLine] = []
+
     @abstractmethod
     async def _close_service_connection(self) -> None:
         """
@@ -89,6 +91,10 @@ class BaseConnection[T: Transport]:
     async def _read_packet(self) -> PacketLine:
         assert self.reader is not None
 
+        if self._shifted_packets:
+            # There are packets that were shifted, return the first one
+            return self._shifted_packets.pop(0)
+
         pkt_marker = await self.reader.readexactly(4)
         pkt_type, payload_length = PacketLineType.from_bytes(pkt_marker)
 
@@ -98,10 +104,16 @@ class BaseConnection[T: Transport]:
         else:
             return PacketLine.from_marker_and_payload(pkt_type, None)
 
+    def _at_eof(self):
+        return not self._shifted_packets and (self.reader is None or self.reader.at_eof())
+
+    def shift_packet(self, packet: PacketLine) -> None:
+        self._shifted_packets.append(packet)
+
     async def _read_packets_until_flush(self) -> AsyncIterator[PacketLine]:
         assert self.reader is not None
 
-        if self.reader.at_eof():
+        if self._at_eof():
             return
 
         while True:
@@ -228,8 +240,8 @@ class FetchConnection[T: Transport](BaseConnection[T]):
 
         # Read the capabilities from the server (https://git-scm.com/docs/protocol-v2#_capability_advertisement)
         version_packet = await self._read_packet()
-        if version_packet.data != b"version 2\n":
-            raise ValueError(f"Unexpected version packet: {version_packet.data}")
+        if version_packet.data.strip() != b"version 2":
+            raise ValueError(f"Expected 'version 2' packet, instead got: {version_packet.data}")
 
         advertised_capabilities: set[str] = set()
         async for packet in self._read_packets_until_flush():
