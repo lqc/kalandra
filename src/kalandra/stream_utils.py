@@ -1,5 +1,4 @@
 import asyncio
-from typing import Coroutine
 
 
 class BytesStreamWriter:
@@ -7,21 +6,16 @@ class BytesStreamWriter:
     Mimick interface of StreamWriter, but write to a buffer instead of a socket.
     """
 
-    def __init__(self, drain_func: Coroutine[None, bytearray, None] | None) -> None:
+    def __init__(self) -> None:
         self._buffer = bytearray()
         self._is_eof = False
-        self._drain_func = drain_func
 
     def write(self, data: bytes) -> None:
         assert not self._is_eof, "Cannot write to a closed stream"
         self._buffer.extend(data)
 
     async def drain(self) -> None:
-        if not self._drain_func or self._buffer:
-            return
-
-        self._drain_func.send(self._buffer)
-        self._buffer.clear()
+        pass
 
     def can_write_eof(self) -> bool:
         return True

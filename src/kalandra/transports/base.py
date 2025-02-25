@@ -12,6 +12,8 @@ from .credentials import CredentialProvider
 
 logger = logging.getLogger(__name__)
 
+MEGABYTES = 1024 * 1024
+
 
 class ConnectionException(Exception):
     pass
@@ -404,18 +406,20 @@ class PushConnection[T: Transport](BaseConnection[T]):
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:  # type: ignore
-        if self.writer:
-            logger.debug("Closing writer")
-            await self._write_packet(PacketLine.FLUSH)
-            self.writer.write_eof()
-            await self.writer.drain()
-            self.writer.close()
-            self.writer = None
-
         if self.reader:
             logger.debug("Closing reader")
             self.reader.feed_eof()
             self.reader = None
+
+        if self.writer:
+            logger.debug("Closing writer")
+            try:
+                await self._write_packet(PacketLine.FLUSH)
+                self.writer.write_eof()
+                self.writer.close()
+            except ConnectionResetError:
+                logger.debug("Connection was reset")
+            self.writer = None
 
         await self._close_service_connection()
 
@@ -441,9 +445,11 @@ class PushConnection[T: Transport](BaseConnection[T]):
 
             line = f"{change.old} {change.new} {change.ref}"
             if first:
-                line += "\0" + " ".join(use_capabilties)
+                line += "\0 " + " ".join(use_capabilties)
                 first = False
             yield PacketLine.data_from_string(line)
+
+        # We need to send flush packet at the end of commands. THIS IS MISSING FROM DOCS!
         yield PacketLine.FLUSH
 
     async def _push_request_v1(
@@ -457,19 +463,33 @@ class PushConnection[T: Transport](BaseConnection[T]):
         # add any report-status capability if supported
         self.add_capability_if_supported(use_capabilties, "report-status")
         self.add_capability_if_supported(use_capabilties, "side-band-64k")
+        self.add_capability_if_supported(use_capabilties, "object-format=sha1")
+        use_capabilties.add("agent=git/2.46.00000")
         supports_delete = "delete-refs" in self.capabilities
 
         packets = self._generate_receive_commands(changes, supports_delete, use_capabilties)
-        has_non_deletes = any(not change.is_delete for change in changes)
+        # has_non_deletes = any(not change.is_delete for change in changes)
 
-        return frozenset(use_capabilties), packets, packfile if has_non_deletes else None
+        return frozenset(use_capabilties), packets, packfile  # if has_non_deletes else None
 
     async def _send_packfile(self, packfile: AsyncBufferedIOBase) -> None:
         assert self.writer is not None
+        expected_total = await packfile.seek(0, 2)
         await packfile.seek(0)
+
+        bcount = 0
+        total = 0
         async for chunk in packfile:
             self.writer.write(chunk)
-            await self.writer.drain()
+            bcount += len(chunk)
+            if bcount >= (10 * MEGABYTES):
+                await self.writer.drain()
+                total += bcount
+                bcount = 0
+                logger.debug("Sent %.1f/%.1f MB", total / MEGABYTES, expected_total / MEGABYTES)
+
+        await self.writer.drain()
+        logger.debug("Packfile sent. Waiting for server response")
 
     async def _send_commands(self, packets: AsyncIterator[PacketLine], packfile: AsyncBufferedIOBase | None) -> None:
         assert self.writer is not None
@@ -495,4 +515,12 @@ class PushConnection[T: Transport](BaseConnection[T]):
             logger.info("Reading report-status")
             async for packet in self._read_packets_until_flush():
                 assert packet.type == PacketLineType.DATA
-                logger.info(packet.data.decode("utf-8").strip())
+                channel = int(packet.data[0])
+
+                if channel == 2:
+                    logger.info("[%d] %r", channel, packet.data.decode("utf-8", "replace"))
+                if channel == 1:
+                    message = PacketLine.from_buffer(packet.data[1:]).data.decode("utf-8", "replace").strip()
+                    logger.info("[%d] %s", channel, message)
+
+        logger.info("Push completed")

@@ -34,10 +34,17 @@ class HTTPSmartConnection(BaseConnection["HTTPTransport"]):
         assert origin is not None, "No hostname in service URL"
         logger.debug("Getting credentials for %s", origin)
         credentials = await self.transport.get_credentials(origin)
+        if not credentials:
+            logger.debug("No credentials found for %s", origin)
+        else:
+            logger.debug("Found credentials for %s", origin)
 
         self._session = self.transport.session_factory(
             auth=aiohttp.BasicAuth(*credentials) if credentials else None,
-            headers={"Git-Protocol": self.git_protocol},
+            headers={
+                "Git-Protocol": self.git_protocol,
+                "User-Agent": "git/2.46.0",
+            },
         )
 
         # As per https://git-scm.com/docs/gitprotocol-http#_url_format
@@ -93,6 +100,7 @@ class HTTPSmartConnection(BaseConnection["HTTPTransport"]):
         logger.debug("Sending command to %s", url)
         resp = await self._session.post(
             url,
+            headers={"Content-Type": f"application/x-{self._service}-request"},
             data=buffer.getvalue(),
         )
 
@@ -121,25 +129,37 @@ class HTTPSmartPushConnection(HTTPSmartConnection, PushConnection["HTTPTransport
 
         async def generate_command_data():
             async for pkt in packets:
+                yield pkt.marker_bytes
                 yield pkt.data
-                logger.debug("Sending packet: %r", pkt)
 
             if packfile is not None:
+                # logger.debug("Sending packfile")
                 await packfile.seek(0)
+                bytes_sent = 0
                 async for chunk in packfile:
                     yield chunk
+                    bytes_sent += len(chunk)
+                logger.debug("Packfile sent: %d bytes", bytes_sent)
+            else:
+                logger.debug("No packfile to send")
 
         # Send a new HTTP POST request with the command
         url = self.transport.url + f"/{self._service}"
         logger.debug("Sending command to %s", url)
         response = await self._session.post(
             url,
-            headers={"Content-Type": f"application/x-{self._service}-request"},
+            read_until_eof=False,
+            read_bufsize=5000,
+            headers={
+                "Content-Type": f"application/x-{self._service}-request",
+                "Cache-Control": "no-cache",
+                "Accept": f"application/x-{self._service}-result",
+            },
             data=generate_command_data(),
         )
+        logger.debug("Response: %s", response.headers)
         if response.status != 200:
-            raise ConnectionException(f"Unexpected status code: {response.status}")
-        logger.debug("Push response headers: %s", response.headers)
+            raise ConnectionException(f"Request failed: {response.status}: {response.reason}")
 
         self.reader = response.content  # type: ignore
 
@@ -155,15 +175,18 @@ class HTTPTransport(Transport):
         super().__init__(url=url, credentials_provider=credentials_provider)
 
         parsed = urlparse(url)
+        assert parsed.scheme in ("http", "https"), f"Unsupported protocol: {parsed.scheme}"
+        self.protocol = parsed.scheme
+
         self.user = parsed.username
         self.host = parsed.hostname
-        self.port = parsed.port or 443
+        self.port = parsed.port
         self.path = parsed.path
         self._session_factory = session_factory
 
     @classmethod
     def can_handle_url(cls, url: str) -> bool:
-        return url.startswith("https://")
+        return url.startswith(("https://", "http://"))
 
     def fetch(self) -> HTTPSmartFetchConnection:
         return HTTPSmartFetchConnection(transport=self)
@@ -173,7 +196,8 @@ class HTTPTransport(Transport):
 
     @property
     def url(self) -> str:
-        return urlunsplit(("https", f"{self.host}", self.path, "", ""))
+        netloc = f"{self.host}:{self.port}" if self.port else self.host
+        return urlunsplit((self.protocol, netloc, self.path, "", ""))
 
     @property
     def session_factory(self) -> SessionFactory:
