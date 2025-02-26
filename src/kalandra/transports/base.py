@@ -41,7 +41,7 @@ class Transport(metaclass=ABCMeta):
     def url(self) -> str:
         return self._url
 
-    async def get_credentials(self, origin: str) -> tuple[str, str] | str | None:
+    async def get_credentials(self, origin: str) -> tuple[str, str] | None:
         return await self.credentials_provider.get_credentials(origin)
 
     @classmethod

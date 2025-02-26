@@ -22,14 +22,6 @@ logger = logging.getLogger(__name__)
 type SessionFactory = type[aiohttp.ClientSession]
 
 
-def _auth_headers(credentials: tuple[str, str] | str | None) -> dict[str, str]:
-    if credentials is None:
-        return {}
-    if isinstance(credentials, str):
-        return {"Authorization": credentials}
-    return {"Authorization": aiohttp.BasicAuth(*credentials).encode()}
-
-
 class HTTPSmartConnection(BaseConnection["HTTPTransport"]):
     _session: aiohttp.ClientSession | None = None
     _service: str | None = None
@@ -43,13 +35,11 @@ class HTTPSmartConnection(BaseConnection["HTTPTransport"]):
         credentials = await self.transport.get_credentials(origin)
 
         self._session = self.transport.session_factory(
-            headers=dict(
-                {
-                    "Git-Protocol": self.git_protocol,
-                    "User-Agent": "git/2.46.0",
-                },
-                **_auth_headers(credentials),
-            ),
+            headers={
+                "Git-Protocol": self.git_protocol,
+                "User-Agent": "git/2.46.0",
+            },
+            auth=aiohttp.BasicAuth(*credentials) if credentials else None,
         )
 
         # As per https://git-scm.com/docs/gitprotocol-http#_url_format

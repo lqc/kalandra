@@ -5,7 +5,7 @@ from pathlib import Path
 
 class CredentialProvider:
     @abstractmethod
-    async def get_credentials(self, origin: str) -> tuple[str, str] | str | None:
+    async def get_credentials(self, origin: str) -> tuple[str, str] | None:
         """
         Get the username and password for the given URL.
 
@@ -32,7 +32,7 @@ class ChainedCredentialProvider(CredentialProvider):
     def __init__(self, *providers: CredentialProvider):
         self._providers = list(providers)
 
-    async def get_credentials(self, origin: str) -> tuple[str, str] | str | None:
+    async def get_credentials(self, origin: str) -> tuple[str, str] | None:
         for provider in self._providers:
             credentials = await provider.get_credentials(origin)
             if credentials is not None:

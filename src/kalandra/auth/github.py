@@ -19,7 +19,7 @@ class GitHubAppCredentialProvider(CredentialProvider):
         if self._installation_id is None:
             logger.warning("No installation found for %s, GitHub authentication disabled", org)
 
-    async def get_credentials(self, origin: str) -> tuple[str, str] | str | None:
+    async def get_credentials(self, origin: str) -> tuple[str, str] | None:
         if origin != "github.com":
             return None
 
