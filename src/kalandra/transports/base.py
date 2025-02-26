@@ -233,6 +233,16 @@ class BaseConnection[T: Transport]:
 
 
 class FetchConnection[T: Transport](BaseConnection[T]):
+    """
+    Git Protocol V2 fetch connection.
+
+    Supported operations:
+
+    - List references via ```#ls_refs()```
+    - Fetch objects via ```#fetch_objects()```
+
+    """
+
     def __init__(self, *, transport: T):
         super().__init__(transport=transport)
 
@@ -283,21 +293,6 @@ class FetchConnection[T: Transport](BaseConnection[T]):
 
         await self._close_service_connection()
 
-    async def ls_refs(self, prefix: str = "") -> AsyncIterator[Ref]:
-        args: list[str] = []
-        if prefix:
-            args.append(f"ref-prefix {prefix}")
-        # Send the command
-        await self._send_command_v2("ls-refs", args)
-
-        # Read the response
-        async for packet in self._read_packets_until_flush():
-            assert packet.type == PacketLineType.DATA
-            ref = Ref.from_line(packet.data.decode("ascii").rstrip())
-            if prefix and not ref.name.startswith(prefix):
-                continue
-            yield ref
-
     async def _process_ack_section(self, ack_section: AsyncIterator[PacketLine], missing_objects: set[str]):
         async for ack in ack_section:
             if ack.data == b"nak\n":
@@ -315,13 +310,34 @@ class FetchConnection[T: Transport](BaseConnection[T]):
         if self.last_packet.type == PacketLineType.FLUSH:
             raise ConnectionException("Server negotiation failed. Missing objects: %s" % (missing_objects,))
 
-    async def send_fetch_request(
+    async def ls_refs(self, prefix: str = "") -> AsyncIterator[Ref]:
+        """
+        (Git Protocol V2) List references on the remote server.
+        """
+        args: list[str] = []
+        if prefix:
+            args.append(f"ref-prefix {prefix}")
+        # Send the command
+        await self._send_command_v2("ls-refs", args)
+
+        # Read the response
+        async for packet in self._read_packets_until_flush():
+            assert packet.type == PacketLineType.DATA
+            ref = Ref.from_line(packet.data.decode("ascii").rstrip())
+            if prefix and not ref.name.startswith(prefix):
+                continue
+            yield ref
+
+    async def fetch_objects(
         self,
         objects: set[str],
         *,
         have: set[str] | None = None,
         output: AsyncBufferedIOBase,
     ) -> None:
+        """
+        (Git Protocol V2) Fetch objects from the remote server.
+        """
         # Send the command
         base_args = ()
         if "wait-for-done" in self.capabilities:
@@ -434,7 +450,7 @@ class PushConnection[T: Transport](BaseConnection[T]):
 
         await self._close_service_connection()
 
-    def add_capability_if_supported(self, in_use: set[str], capability: str) -> bool:
+    def _add_capability_if_supported(self, in_use: set[str], capability: str) -> bool:
         if capability in self.capabilities:
             in_use.add(capability)
             return True
@@ -472,9 +488,9 @@ class PushConnection[T: Transport](BaseConnection[T]):
         use_capabilties: set[str] = set()
 
         # add any report-status capability if supported
-        self.add_capability_if_supported(use_capabilties, "report-status")
-        self.add_capability_if_supported(use_capabilties, "side-band-64k")
-        self.add_capability_if_supported(use_capabilties, "object-format=sha1")
+        self._add_capability_if_supported(use_capabilties, "report-status")
+        self._add_capability_if_supported(use_capabilties, "side-band-64k")
+        self._add_capability_if_supported(use_capabilties, "object-format=sha1")
         use_capabilties.add("agent=git/2.46.00000")
         supports_delete = "delete-refs" in self.capabilities
 
@@ -511,9 +527,9 @@ class PushConnection[T: Transport](BaseConnection[T]):
         if packfile is not None:
             await self._send_packfile(packfile)
 
-    async def send_change_request(self, changes: list[RefChange], packfile: AsyncBufferedIOBase | None) -> None:
+    async def push_changes(self, changes: list[RefChange], packfile: AsyncBufferedIOBase | None) -> None:
         """
-        Send a change request to the server.
+        (Git Protocol V1) Send changes to the remote server.
 
         @see: https://git-scm.com/docs/gitprotocol-pack#_pushing_data_to_a_server
         """

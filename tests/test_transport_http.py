@@ -1,5 +1,5 @@
 import asyncio
-from typing import NamedTuple
+from typing import Any, NamedTuple
 from unittest.mock import AsyncMock, MagicMock
 
 import aiohttp
@@ -30,12 +30,17 @@ class MockResponse(NamedTuple):
         return cls(status, dict(headers), reader)
 
 
-def mock_session(*responses: MockResponse) -> type[aiohttp.ClientSession]:
+def mock_session(*args: MockResponse) -> type[aiohttp.ClientSession]:
+    responses = list(args)
+
+    def take_next_request(*args: Any, **kwargs: Any) -> MockResponse:
+        return responses.pop(0)
+
     session = MagicMock(aiohttp.ClientSession)
     session.get = AsyncMock()
     session.post = AsyncMock()
-    session.get.side_effect = responses
-    session.post.side_effect = responses
+    session.get.side_effect = take_next_request
+    session.post.side_effect = take_next_request
 
     session_factory = MagicMock()
     session_factory.return_value = session
@@ -121,6 +126,14 @@ GERRIT_UPLOAD_HELLO = (
 @pytest.mark.asyncio
 @pytest.mark.http_interactions(
     MockResponse.create(200, {"Content-Type": "application/x-git-upload-pack-advertisement"}, GITHUB_UPLOAD_HELLO),
+    MockResponse.create(
+        200,
+        {"Content-Type": "application/x-git-upload-pack-response"},
+        b"""003d0c3358886db1586913aba030e59e4b53c80659c9 refs/heads/main
+0042f0b710df22916ef01713e96b0d77abac50e45a6b refs/heads/publisher
+0000
+""",
+    ),
 )
 async def test_http_fetch_hello_v2(mocked_http_transport: HTTPTransport):
     async with mocked_http_transport.fetch() as connection:
@@ -130,6 +143,12 @@ async def test_http_fetch_hello_v2(mocked_http_transport: HTTPTransport):
             "object-format=sha1",
             "server-option",
             "agent=git/github-d6c9584635a2",
+        }
+
+        known_refs = {ref.name: ref.object_id async for ref in connection.ls_refs()}
+        assert known_refs == {
+            "refs/heads/main": "0c3358886db1586913aba030e59e4b53c80659c9",
+            "refs/heads/publisher": "f0b710df22916ef01713e96b0d77abac50e45a6b",
         }
 
 

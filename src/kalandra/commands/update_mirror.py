@@ -63,11 +63,11 @@ async def update_mirror(
 
             if new_objects:
                 logger.info("Fetching objects from upstream")
-                await upstream_conn.send_fetch_request(new_objects, have=have_objects, output=packfile)
+                await upstream_conn.fetch_objects(new_objects, have=have_objects, output=packfile)
             else:
                 logger.info("No new objects to fetch, only deletes or updates")
 
             # Push objects to mirror
             await packfile.seek(0)
             logger.info("Sending changes to mirror")
-            await mirror_conn.send_change_request(changes, packfile)
+            await mirror_conn.push_changes(changes, packfile)
