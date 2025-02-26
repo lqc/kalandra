@@ -21,10 +21,6 @@ async def calculate_mirror_updates(mirror_refs: dict[str, str], upstream_refs: A
             refs_to_update.pop(ref.name, None)
             continue
 
-        # if ref.name.startswith("refs/remotes/"):
-        #     # if the upstream is a non-bare repository, we don't want to mirror remote branches
-        #     continue
-
         old_id = refs_to_update.pop(ref.name, NULL_OBJECT_ID)
         if old_id != ref.object_id:
             yield RefChange(ref.name, old_id, ref.object_id)
