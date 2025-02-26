@@ -161,31 +161,42 @@ class BaseConnection[T: Transport]:
             raise ValueError(f"Unexpected packet type: {header.type}: {header.data}")
         return header.data.decode("ascii").rstrip()
 
-    async def _send_command_v2(
+    async def _generate_command_v2(
         self,
         command: str,
         args: Iterable[str],
         **capabilities: dict[str, str],
-    ) -> None:
+    ) -> AsyncIterator[PacketLine]:
         """
         Send a command to the server with the given arguments and capabilities using GitProtocol V2.
 
         See: https://git-scm.com/docs/gitprotocol-v2#_command_request
         """
         # Send command
-        await self._write_packet(PacketLine.data_from_string(f"command={command}"))
+        yield PacketLine.data_from_string(f"command={command}")
         # Send capabilities
         for key, value in capabilities.items():
             data = f"{key}={value}" if len(value) > 0 else key
-            await self._write_packet(PacketLine.data_from_string(data))
+            yield PacketLine.data_from_string(data)
 
-        await self._write_packet(PacketLine.DELIMITER)
+        yield PacketLine.DELIMITER
 
         # send arguments
         for arg in args:
-            await self._write_packet(PacketLine.data_from_string(arg))
+            yield PacketLine.data_from_string(arg)
 
-        await self._write_packet(PacketLine.FLUSH)
+        yield PacketLine.FLUSH
+
+    async def _send_command_v2(
+        self,
+        command: str,
+        args: Iterable[str],
+        **capabilities: dict[str, str],
+    ) -> None:
+        assert self.writer is not None
+
+        async for pkt in self._generate_command_v2(command, args, **capabilities):
+            await self._write_packet(pkt)
 
     async def _read_v1_server_hello(self) -> tuple[dict[str, str], frozenset[str]]:
         """

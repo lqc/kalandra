@@ -7,7 +7,6 @@ import aiohttp
 from aiofiles.threadpool.binary import AsyncBufferedIOBase
 
 from kalandra.gitprotocol import PacketLine, PacketLineType
-from kalandra.stream_utils import BytesStreamWriter
 
 from .base import (
     BaseConnection,
@@ -91,17 +90,22 @@ class HTTPSmartConnection(BaseConnection["HTTPTransport"]):
         assert self.writer is None
         assert self._session is not None
 
-        buffer = self.writer = BytesStreamWriter()  # type: ignore
-        await super()._send_command_v2(command, args, **capabilities)
-        self.writer = None
+        async def generate_command_data() -> AsyncIterator[bytes]:
+            async for pkt in self._generate_command_v2(command, args, **capabilities):
+                yield pkt.marker_bytes
+                yield pkt.data
 
         # Send a new HTTP POST request with the command
         url = self.transport.url + f"/{self._service}"
         logger.debug("Sending command to %s", url)
         resp = await self._session.post(
             url,
-            headers={"Content-Type": f"application/x-{self._service}-request"},
-            data=buffer.getvalue(),
+            headers={
+                "Content-Type": f"application/x-{self._service}-request",
+                "Cache-Control": "no-cache",
+                "Accept": f"application/x-{self._service}-result",
+            },
+            data=generate_command_data(),
         )
 
         if resp.status != 200:

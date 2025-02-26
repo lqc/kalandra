@@ -12,7 +12,7 @@ class CredentialProvider:
         :param origin: The Origin to get the credentials for.
         :return: A tuple of username and password or None if no credentials are available.
         """
-        return None
+        return None  # pragma: no cover
 
 
 class NetrcCredentialProvider(CredentialProvider):
