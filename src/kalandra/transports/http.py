@@ -68,7 +68,7 @@ class HTTPSmartConnection(BaseConnection["HTTPTransport"]):
             if service_name == "git-upload-pack" and header.data == b"version 2":
                 # JGit servers do not send the service name, but they do send the version immediately
                 logger.warning("JGit server did not send service name, assuming git-upload-pack")
-                self.shift_packet(header)
+                self._shift_packet(header)
             else:
                 raise ConnectionException(f"Smart protocol requires service header, instead got: {header}")
         else:
@@ -80,6 +80,11 @@ class HTTPSmartConnection(BaseConnection["HTTPTransport"]):
     async def _close_service_connection(self) -> None:
         if self._session:
             await self._session.close()
+
+
+class HTTPSmartFetchConnection(HTTPSmartConnection, FetchConnection["HTTPTransport"]):
+    async def _open_fetch_service_connection(self) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+        return await self._open_service_connection("git-upload-pack")
 
     async def _send_command_v2(
         self,
@@ -112,11 +117,6 @@ class HTTPSmartConnection(BaseConnection["HTTPTransport"]):
             raise ConnectionException(f"Unexpected status code: {resp.status}")
 
         self.reader = resp.content  # type: ignore
-
-
-class HTTPSmartFetchConnection(HTTPSmartConnection, FetchConnection["HTTPTransport"]):
-    async def _open_fetch_service_connection(self) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
-        return await self._open_service_connection("git-upload-pack")
 
 
 class HTTPSmartPushConnection(HTTPSmartConnection, PushConnection["HTTPTransport"]):
