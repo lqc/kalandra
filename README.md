@@ -41,7 +41,8 @@ Completed features:
 
 Planned features:
 
-- [ ] support for ``http://`` targets.
+- [X] support for ``http://`` targets.
+- [ ] GitHub App token authentication for HTTP
 - [ ] package as OCI image.
 - [ ] optimize use of capabilities like ``ofs-delta``.
 - [ ] add ``server mode`` where you can trigger a sync round for pre-configured targets over HTTP
