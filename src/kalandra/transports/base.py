@@ -6,9 +6,8 @@ from typing import AsyncIterator, Iterable
 
 from aiofiles.threadpool.binary import AsyncBufferedIOBase
 
+from kalandra.auth.basic import CredentialProvider
 from kalandra.gitprotocol import PacketLine, PacketLineType, Ref, RefChange
-
-from .credentials import CredentialProvider
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +41,7 @@ class Transport(metaclass=ABCMeta):
     def url(self) -> str:
         return self._url
 
-    async def get_credentials(self, origin: str) -> tuple[str, str] | None:
+    async def get_credentials(self, origin: str) -> tuple[str, str] | str | None:
         return await self.credentials_provider.get_credentials(origin)
 
     @classmethod

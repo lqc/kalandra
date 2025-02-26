@@ -13,6 +13,11 @@ asyncssh = "^2.17.0"
 aiofiles = "^24.1.0"
 aiohttp = "^3.11.12"
 
+pygithub = { version = "^2.6.1", optional = true }
+
+[tool.poetry.extras]
+github = ["pygithub"]
+
 [tool.poetry.group.dev]
 optional = true
 

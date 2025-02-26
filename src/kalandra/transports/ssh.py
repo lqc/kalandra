@@ -4,6 +4,7 @@ from typing import Literal
 
 import asyncssh
 
+from kalandra.auth.basic import CredentialProvider
 from kalandra.gitprotocol import PacketLine
 
 from .base import (
@@ -13,7 +14,6 @@ from .base import (
     PushConnection,
     Transport,
 )
-from .credentials import CredentialProvider
 
 logger = logging.getLogger(__name__)
 

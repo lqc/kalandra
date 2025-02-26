@@ -6,6 +6,7 @@ from urllib.parse import urlparse, urlunsplit
 import aiohttp
 from aiofiles.threadpool.binary import AsyncBufferedIOBase
 
+from kalandra.auth.basic import CredentialProvider
 from kalandra.gitprotocol import PacketLine, PacketLineType
 
 from .base import (
@@ -15,11 +16,18 @@ from .base import (
     PushConnection,
     Transport,
 )
-from .credentials import CredentialProvider
 
 logger = logging.getLogger(__name__)
 
 type SessionFactory = type[aiohttp.ClientSession]
+
+
+def _auth_headers(credentials: tuple[str, str] | str | None) -> dict[str, str]:
+    if credentials is None:
+        return {}
+    if isinstance(credentials, str):
+        return {"Authorization": credentials}
+    return {"Authorization": aiohttp.BasicAuth(*credentials).encode()}
 
 
 class HTTPSmartConnection(BaseConnection["HTTPTransport"]):
@@ -33,17 +41,15 @@ class HTTPSmartConnection(BaseConnection["HTTPTransport"]):
         assert origin is not None, "No hostname in service URL"
         logger.debug("Getting credentials for %s", origin)
         credentials = await self.transport.get_credentials(origin)
-        if not credentials:
-            logger.debug("No credentials found for %s", origin)
-        else:
-            logger.debug("Found credentials for %s", origin)
 
         self._session = self.transport.session_factory(
-            auth=aiohttp.BasicAuth(*credentials) if credentials else None,
-            headers={
-                "Git-Protocol": self.git_protocol,
-                "User-Agent": "git/2.46.0",
-            },
+            headers=dict(
+                {
+                    "Git-Protocol": self.git_protocol,
+                    "User-Agent": "git/2.46.0",
+                },
+                **_auth_headers(credentials),
+            ),
         )
 
         # As per https://git-scm.com/docs/gitprotocol-http#_url_format
@@ -53,7 +59,10 @@ class HTTPSmartConnection(BaseConnection["HTTPTransport"]):
         hello_resp = await self._session.get(service_url, headers={"Git-Protocol": self.git_protocol})
 
         if hello_resp.status != 200:
-            raise ConnectionException(f"Unexpected status code: {hello_resp.status}")
+            import pdb
+
+            pdb.set_trace()
+            raise ConnectionException(f"Failed to connect to server {hello_resp.reason} ({hello_resp.status})")
 
         content_type = hello_resp.headers.get("Content-Type")
         if content_type != f"application/x-{service_name}-advertisement":
@@ -114,7 +123,7 @@ class HTTPSmartFetchConnection(HTTPSmartConnection, FetchConnection["HTTPTranspo
         )
 
         if resp.status != 200:
-            raise ConnectionException(f"Unexpected status code: {resp.status}")
+            raise ConnectionException(f"Failed to send '{command}' command: {resp.reason} ({resp.status})")
 
         self.reader = resp.content  # type: ignore
 
