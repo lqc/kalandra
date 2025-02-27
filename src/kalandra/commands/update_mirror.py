@@ -13,15 +13,12 @@ async def calculate_mirror_updates(mirror_refs: dict[str, str], upstream_refs: A
     """
     Calculate the updates that need to be pushed to the mirror.
     """
-    refs_to_update = dict(mirror_refs)
+    refs_to_update = {k: v for k, v in mirror_refs.items() if k.startswith("refs/heads/") or k.startswith("refs/tags/")}
 
     async for ref in upstream_refs:
-        if not ref.name.startswith("refs"):
+        if not ref.name.startswith("refs/heads/") and not ref.name.startswith("refs/tags/"):
+            logger.debug("Skipping %s, not a branch or tag", ref.name)
             refs_to_update.pop(ref.name, None)
-            continue
-
-        if ref.name.startswith("refs/remotes/"):
-            # if the upstream is a non-bare repository, we don't want to mirror remote branches
             continue
 
         old_id = refs_to_update.pop(ref.name, NULL_OBJECT_ID)
@@ -64,10 +61,13 @@ async def update_mirror(
             new_objects.discard(NULL_OBJECT_ID)
             have_objects = set(mirror_conn.refs.values())
 
-            logger.info("Fetching objects from upstream")
-            await upstream_conn.send_fetch_request(new_objects, have=have_objects, output=packfile)
+            if new_objects:
+                logger.info("Fetching objects from upstream")
+                await upstream_conn.fetch_objects(new_objects, have=have_objects, output=packfile)
+            else:
+                logger.info("No new objects to fetch, only deletes or updates")
 
             # Push objects to mirror
             await packfile.seek(0)
             logger.info("Sending changes to mirror")
-            await mirror_conn.send_change_request(changes, packfile)
+            await mirror_conn.push_changes(changes, packfile)

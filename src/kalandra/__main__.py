@@ -1,9 +1,10 @@
 import argparse
 import asyncio
 import logging
+import pathlib
 
 from .commands.update_mirror import update_mirror
-from .transports import Transport
+from .transports import NetrcCredentialProvider, Transport
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,12 @@ def create_parser():
         help="Don't download or push any changes, just print the ref differences",
     )
 
+    parser.add_argument(
+        "--netrc-file",
+        help="Path to the .netrc file to read credentials from. If not provided, the default location is used.",
+        type=pathlib.Path,
+    )
+
     return parser
 
 
@@ -30,8 +37,10 @@ async def main():
 
     logger.debug("Args: %s", args)
 
-    upstream = Transport.from_url(args.upstream)
-    mirror = Transport.from_url(args.mirror)
+    credentials_provider = NetrcCredentialProvider(args.netrc_file)
+
+    upstream = Transport.from_url(args.upstream, credentials_provider=credentials_provider)
+    mirror = Transport.from_url(args.mirror, credentials_provider=credentials_provider)
 
     await update_mirror(upstream, mirror, dry_run=args.dry_run)
 
