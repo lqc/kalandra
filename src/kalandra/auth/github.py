@@ -5,14 +5,26 @@ from .basic import CredentialProvider
 
 logger = logging.getLogger(__name__)
 
+try:
+    from github import Auth, GithubIntegration
+except ImportError:  # pragma: no cover
+    Auth = None
+    GithubIntegration = None
+
+
+def create_integration(app_id: str, private_key: pathlib.Path):
+    if Auth is None or GithubIntegration is None:
+        raise Exception("GitHub integration not available, install kaladra[github] to enable it.")
+
+    auth = Auth.AppAuth(app_id=app_id, private_key=lambda: private_key.read_bytes())
+    return GithubIntegration(auth=auth)
+
 
 class GitHubAppCredentialProvider(CredentialProvider):
     _installation_id: int | None = None
 
     def __init__(self, app_id: str, private_key: pathlib.Path, org: str):
-        from github import Auth, GithubIntegration
-
-        self._integration = GithubIntegration(auth=Auth.AppAuth(app_id, private_key=lambda: private_key.read_bytes()))
+        self._integration = create_integration(app_id, private_key)
         installation = self._integration.get_org_installation(org)
         self._installation_id = installation.id if installation else None
 
