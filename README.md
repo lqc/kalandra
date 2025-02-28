@@ -38,14 +38,15 @@ Completed features:
 
 - [X] support for ``file://`` targets.
 - [X] basic support for ``ssh://`` targets using [AsyncSSH](https://github.com/ronf/asyncssh).
-
-Planned features:
-
 - [X] support for ``http://`` targets.
-- [ ] GitHub App token authentication for HTTP
+- [X] GitHub App token authentication for HTTP
+
+Planned features (in order of priority):
+
+- [ ] add "sync-to-github" command which updates a mirror on GitHub based on metadata configured
+  in [GH custom properties](https://docs.github.com/en/organizations/managing-organization-settings/managing-custom-properties-for-repositories-in-your-organization#about-custom-properties)
 - [ ] package as OCI image.
 - [ ] optimize use of capabilities like ``ofs-delta``.
-- [ ] add ``server mode`` where you can trigger a sync round for pre-configured targets over HTTP
 
 ## Contributing
 
@@ -53,6 +54,6 @@ TBD
 
 ## License
 
-Copyright (c) 2024 Łukasz Rekucki
+Copyright (c) 2024-2025 Łukasz Rekucki
 
 [Apache License, Version 2.0](https://www.apache.org/licenses/LICENSE-2.0)
