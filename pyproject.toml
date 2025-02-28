@@ -13,6 +13,11 @@ asyncssh = "^2.17.0"
 aiofiles = "^24.1.0"
 aiohttp = "^3.11.12"
 
+pygithub = { version = "^2.6.1", optional = true }
+
+[tool.poetry.extras]
+github = ["pygithub"]
+
 [tool.poetry.group.dev]
 optional = true
 
@@ -27,6 +32,7 @@ addopts = '--import-mode=importlib --cov --cov-report=lcov'
 log_cli = true
 log_cli_level = "INFO"
 log_cli_format = "%(levelname)8s %(message)s"
+markers = ["http_interactions: mark test as requiring HTTP interactions"]
 
 testpaths = ['tests']
 

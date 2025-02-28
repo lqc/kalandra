@@ -6,9 +6,8 @@ from typing import AsyncIterator, Iterable
 
 from aiofiles.threadpool.binary import AsyncBufferedIOBase
 
+from kalandra.auth.basic import CredentialProvider
 from kalandra.gitprotocol import PacketLine, PacketLineType, Ref, RefChange
-
-from .credentials import CredentialProvider
 
 logger = logging.getLogger(__name__)
 

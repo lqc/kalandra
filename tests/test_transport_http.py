@@ -5,7 +5,8 @@ from unittest.mock import AsyncMock, MagicMock
 import aiohttp
 import pytest
 
-from kalandra.transports import CredentialProvider, HTTPTransport
+from kalandra.auth import CredentialProvider
+from kalandra.transports import HTTPTransport
 
 
 class StaticCredentialProvider(CredentialProvider):

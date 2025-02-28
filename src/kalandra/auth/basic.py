@@ -26,3 +26,18 @@ class NetrcCredentialProvider(CredentialProvider):
     async def get_credentials(self, origin: str) -> tuple[str, str] | None:
         match = self._netrc.authenticators(origin)
         return (match[0], match[2]) if match else None
+
+
+class ChainedCredentialProvider(CredentialProvider):
+    def __init__(self, *providers: CredentialProvider):
+        self._providers = list(providers)
+
+    async def get_credentials(self, origin: str) -> tuple[str, str] | None:
+        for provider in self._providers:
+            credentials = await provider.get_credentials(origin)
+            if credentials is not None:
+                return credentials
+        return None
+
+    def add_provider(self, provider: CredentialProvider):
+        self._providers.append(provider)

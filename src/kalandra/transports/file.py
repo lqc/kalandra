@@ -3,8 +3,9 @@ import logging
 from pathlib import Path
 from typing import Literal
 
+from kalandra.auth.basic import CredentialProvider
+
 from .base import BaseConnection, FetchConnection, PushConnection, Transport
-from .credentials import CredentialProvider
 
 logger = logging.getLogger(__name__)
 
