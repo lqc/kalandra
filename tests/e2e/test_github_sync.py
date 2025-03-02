@@ -39,8 +39,29 @@ async def test_github_sync(github_app_from_env: tuple[str, Path]):
             str(github_app_from_env[1]),
             "--github-org",
             "kalandra-test",
+            "--source",
             "https://github.com/kalandra-test/mirror-source.git",
+            "--target",
             "https://github.com/kalandra-test/mirror-target.git",
+        ]
+    )
+    assert result == 0
+
+
+@pytest.mark.asyncio
+async def test_github_sync_custom_property(github_app_from_env: tuple[str, Path]):
+    result = await main(
+        [
+            "--github-app-id",
+            github_app_from_env[0],
+            "--github-app-key",
+            str(github_app_from_env[1]),
+            "--github-org",
+            "kalandra-test",
+            "--target",
+            "https://github.com/kalandra-test/mirror-target.git",
+            "--source",
+            "target-prop:mirror-source",
         ]
     )
     assert result == 0

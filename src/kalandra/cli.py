@@ -15,8 +15,16 @@ def create_parser():
         exit_on_error=False,
     )
 
-    parser.add_argument("upstream", help="URL of the repository to take changes from")
-    parser.add_argument("mirror", help="URL of the mirror to push changes to")
+    parser.add_argument(
+        "--source",
+        help="URL of the repository to take changes from",
+        required=True,
+    )
+    parser.add_argument(
+        "--target",
+        help="URL of the repository to push changes to",
+        required=True,
+    )
 
     parser.add_argument(
         "--dry-run",
@@ -46,7 +54,7 @@ def create_parser():
 
     parser.add_argument(
         "--github-org",
-        help="GitHub Application Private Key to be used for HTTP authentication.",
+        help="GitHub Org to use for GitHub App authentication",
     )
 
     return parser
@@ -74,11 +82,29 @@ async def main(cmdline_args: list[str]) -> int:
         provider = GitHubAppCredentialProvider(args.github_app_id, args.github_app_key, args.github_org)
         credentials_provider.add_provider(provider)
 
-    upstream = Transport.from_url(args.upstream, credentials_provider=credentials_provider)
-    mirror = Transport.from_url(args.mirror, credentials_provider=credentials_provider)
+    source_url = args.source
+
+    if source_url.startswith("target-prop:"):
+        assert args.github_app_id and args.github_app_key, "GitHub App required for target-prop"
+
+        logger.info("Looking up source URL from target repository")
+        from kalandra.github_utils import get_repo_property
+
+        source_url = await get_repo_property(
+            repo_url=args.target,
+            property_name=args.source,
+            app_id=args.github_app_id,
+            private_key=args.github_app_key,
+        )
+        if source_url is None:
+            logger.error("Property %s not found in target repository", args.source)
+            return 1
+
+    source = Transport.from_url(source_url, credentials_provider=credentials_provider)
+    target = Transport.from_url(args.target, credentials_provider=credentials_provider)
 
     try:
-        await update_mirror(upstream, mirror, dry_run=args.dry_run)
+        await update_mirror(source, target, dry_run=args.dry_run)
         return 0
     except Exception as e:
         logger.error("Unexpected error: %s", e)
