@@ -1,3 +1,4 @@
+import base64
 import os
 from pathlib import Path
 
@@ -15,6 +16,14 @@ def github_app_from_env(tmp_path: Path):
         pytest.skip("No GitHub App credentials provided")
 
     tmp_key_path = tmp_path / "app-key.pem"
+
+    if not app_key.startswith("-----BEGIN"):
+        try:
+            app_key = base64.b64decode(app_key).decode("utf-8")
+        except Exception:
+            pass
+
+        raise ValueError("Invalid GitHub App key. Expected PEM format or base64 encoded PEM")
 
     with open(tmp_path / "app-key.pem", "w") as f:
         f.write(app_key)
