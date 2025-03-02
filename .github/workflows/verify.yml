@@ -50,6 +50,9 @@ jobs:
         run: poetry install --with dev --all-extras
 
       - name: Run tests
+        env:
+          TEST_GITHUB_APP_ID: ${{ secrets.KALANDRA_TEST_APP_ID }}
+          TEST_GITHUB_APP_KEY: ${{ secrets.KALANDRA_TEST_APP_KEY }}  # Note: The key is base64 encoded to avoid issues with multiline env vars
         run: poetry run pytest --cov=src -vv --junit-xml=build/e2e-test-results.xml
 
       - name: Type checking
