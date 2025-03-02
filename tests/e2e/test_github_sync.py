@@ -20,10 +20,8 @@ def github_app_from_env(tmp_path: Path):
     if not app_key.startswith("-----BEGIN"):
         try:
             app_key = base64.b64decode(app_key).decode("utf-8")
-        except Exception:
-            pass
-
-        raise ValueError("Invalid GitHub App key. Expected PEM format or base64 encoded PEM")
+        except Exception as e:
+            raise ValueError("Invalid GitHub App key. Expected PEM format or base64 encoded PEM") from e
 
     with open(tmp_path / "app-key.pem", "w") as f:
         f.write(app_key)
