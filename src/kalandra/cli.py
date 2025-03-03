@@ -77,24 +77,30 @@ async def main(cmdline_args: list[str]) -> int:
 
     if args.github_app_id or args.github_app_key:
         assert args.github_app_id and args.github_app_key, "GitHub App requires both ID and private key"
-        from kalandra.auth.github import GitHubAppCredentialProvider
+        try:
+            from kalandra.github_utils import GithubAPI
+        except ImportError:
+            logger.error("GitHub integration not available, install kalandra[github] to enable it.")
+            return 1
 
-        provider = GitHubAppCredentialProvider(args.github_app_id, args.github_app_key, args.github_org)
-        credentials_provider.add_provider(provider)
+        github_api = GithubAPI(args.github_app_id, args.github_app_key)
+
+        credentials_provider.add_provider(github_api.crendentials_provider_for_org(args.github_org))
+    else:
+        github_api = None
 
     source_url = args.source
 
     if source_url.startswith("target-prop:"):
-        assert args.github_app_id and args.github_app_key, "GitHub App required for target-prop"
+        if github_api is None:
+            logger.error("GitHub App credentials are required to use target-prop")
+            return 1
 
         logger.info("Looking up source URL from target repository")
-        from kalandra.github_utils import get_repo_property
 
-        source_url = await get_repo_property(
+        source_url = await github_api.get_repo_property(
             repo_url=args.target,
-            property_name=args.source,
-            app_id=args.github_app_id,
-            private_key=args.github_app_key,
+            property_name=args.source[len("target-prop:") :],
         )
         if source_url is None:
             logger.error("Property %s not found in target repository", args.source)
