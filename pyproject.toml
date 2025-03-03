@@ -7,6 +7,9 @@ readme = "README.md"
 packages = [{ include = "kalandra", from = "src/" }]
 license = "Apache-2.0"
 
+[tool.poetry.scripts]
+kalandra = 'kalandra.__main__:run'
+
 [tool.poetry.dependencies]
 python = "^3.12"
 asyncssh = "^2.17.0"
