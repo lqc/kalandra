@@ -9,8 +9,8 @@ LABEL org.opencontainers.image.licenses="Apache 2.0"
 
 WORKDIR /opt/app
 RUN \
-    --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/opt/cache/pip \
     --mount=type=bind,target=/opt/app \
-    pip install --cache-dir /opt/cache/pip .
+    pip install --cache-dir /opt/cache/pip '.[github]'
 
 ENTRYPOINT ["kalandra"]

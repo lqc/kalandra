@@ -114,10 +114,7 @@ class BaseConnection[T: Transport]:
     async def _read_packets_until_flush(self) -> AsyncIterator[PacketLine]:
         assert self.reader is not None
 
-        if self._at_eof():
-            return
-
-        while True:
+        while not self._at_eof():
             try:
                 packet = await self._read_packet()
                 if packet.type == PacketLineType.FLUSH:
@@ -548,5 +545,6 @@ class PushConnection[T: Transport](BaseConnection[T]):
                 if channel == 1:
                     message = PacketLine.from_buffer(packet.data[1:]).data.decode("utf-8", "replace").strip()
                     logger.info("[%d] %s", channel, message)
+            logger.info("Report-status completed")
 
         logger.info("Push completed")
