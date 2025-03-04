@@ -3,7 +3,7 @@ import logging
 import pathlib
 
 from .auth import ChainedCredentialProvider, NetrcCredentialProvider
-from .commands.update_mirror import update_mirror
+from .commands.update_mirror import create_glob_filter, update_mirror
 from .transports import Transport
 
 logger = logging.getLogger(__name__)
@@ -57,6 +57,20 @@ def create_parser():
         help="GitHub Org to use for GitHub App authentication",
     )
 
+    parser.add_argument(
+        "--include-ref",
+        help="Include only refs that match the given glob patter. Default: refs/heads/*, refs/tags/*",
+        action="append",
+        default=["refs/heads/*", "refs/tags/*"],
+    )
+
+    parser.add_argument(
+        "--exclude-ref",
+        help="Exclude refs that match the given glob pattern. This takes precedence over --include-ref",
+        action="append",
+        default=[],
+    )
+
     return parser
 
 
@@ -69,8 +83,11 @@ async def main(cmdline_args: list[str]) -> int:
         parser.print_help()
         return 2
 
-    credentials_provider = ChainedCredentialProvider()
+    include_filter = create_glob_filter(*args.include_ref)
+    exclude_filter = create_glob_filter(*args.exclude_ref)
 
+    # Credentials provider
+    credentials_provider = ChainedCredentialProvider()
     if args.netrc is not None:
         netrc_file = args.netrc if isinstance(args.netrc, pathlib.Path) else None
         credentials_provider.add_provider(NetrcCredentialProvider(netrc_file))
@@ -110,7 +127,13 @@ async def main(cmdline_args: list[str]) -> int:
     target = Transport.from_url(args.target, credentials_provider=credentials_provider)
 
     try:
-        await update_mirror(source, target, dry_run=args.dry_run)
+        await update_mirror(
+            source,
+            target,
+            dry_run=args.dry_run,
+            include_filter=include_filter,
+            exclude_filter=exclude_filter,
+        )
         return 0
     except Exception as e:
         logger.error("Unexpected error while mirroring", exc_info=e)
