@@ -7,7 +7,7 @@ from kalandra.cli import main
 
 def run():
     logging.basicConfig(level=logging.DEBUG)
-    result = asyncio.run(main(sys.argv))
+    result = asyncio.run(main(sys.argv[1:]))
     sys.exit(result)
 
 
