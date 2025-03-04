@@ -49,9 +49,9 @@ jobs:
       - name: Build OCI image
         shell: bash
         run: |
-          IMAGE_TAG=$(poetry version --short)
+          IMAGE_TAG="$(poetry version --short)"
           docker buildx build \
-            --output=type=registry --tag ghcr.io/lqc/kalandra:${IMAGE_TAG} \
+            --output=type=registry --tag "ghcr.io/lqc/kalandra:${IMAGE_TAG}" \
             .
 
   pypi-publish:
