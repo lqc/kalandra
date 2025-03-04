@@ -55,11 +55,13 @@ jobs:
             .
 
   pypi-publish:
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-24.04 # PyPI action doesn't support ARM yet
     needs:
       - release-build
     permissions:
       id-token: write
+    # Don't clutter PyPI with snapshots
+    if: github.event_name == 'push'
 
     steps:
       - name: Retrieve release distributions

@@ -33,9 +33,13 @@ class GithubAPI:
         self._org_installations: dict[str, int | None] = {}
 
     def get_installation_id(self, org: str) -> None | int:
+        if not org:
+            raise ValueError("No org provided")
+
         if org not in self._org_installations:
             installation = self._integration.get_org_installation(org)
             self._org_installations[org] = installation.id if installation else None
+
         return self._org_installations[org]
 
     def get_org_api(self, org: str) -> github.Github:
