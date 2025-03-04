@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import os
+import time
 from typing import AsyncIterator, Iterable, Literal
 from urllib.parse import urlparse, urlunsplit
 
@@ -20,6 +22,12 @@ from .base import (
 logger = logging.getLogger(__name__)
 
 type SessionFactory = type[aiohttp.ClientSession]
+
+
+def http_timeout():
+    total_timeout = int(os.environ.get("KALANDRA_HTTP_TIMEOUT", 1200))  # default 20 minutes
+    logger.debug("HTTP timeout set to %d seconds", total_timeout)
+    return aiohttp.ClientTimeout(total=total_timeout, connect=60, sock_connect=60)
 
 
 class HTTPSmartConnection(BaseConnection["HTTPTransport"]):
@@ -46,12 +54,12 @@ class HTTPSmartConnection(BaseConnection["HTTPTransport"]):
         service_url = self.transport.url + f"/info/refs?service={service_name}"
 
         logger.debug("Connecting to %s, protocol %s", service_url, self.git_protocol)
-        hello_resp = await self._session.get(service_url, headers={"Git-Protocol": self.git_protocol})
+        hello_resp = await self._session.get(
+            service_url,
+            headers={"Accept": f"application/x-{service_name}-advertisement"},
+        )
 
         if hello_resp.status != 200:
-            import pdb
-
-            pdb.set_trace()
             raise ConnectionException(f"Failed to connect to server {hello_resp.reason} ({hello_resp.status})")
 
         content_type = hello_resp.headers.get("Content-Type")
@@ -101,7 +109,7 @@ class HTTPSmartFetchConnection(HTTPSmartConnection, FetchConnection["HTTPTranspo
 
         # Send a new HTTP POST request with the command
         url = self.transport.url + f"/{self._service}"
-        logger.debug("Sending command to %s", url)
+        logger.debug("Sending FETCH command to %s", url)
         resp = await self._session.post(
             url,
             headers={
@@ -110,12 +118,16 @@ class HTTPSmartFetchConnection(HTTPSmartConnection, FetchConnection["HTTPTranspo
                 "Accept": f"application/x-{self._service}-result",
             },
             data=generate_command_data(),
+            timeout=http_timeout(),
         )
 
         if resp.status != 200:
             raise ConnectionException(f"Failed to send '{command}' command: {resp.reason} ({resp.status})")
 
         self.reader = resp.content  # type: ignore
+
+
+MEGABTE = 1024 * 1024
 
 
 class HTTPSmartPushConnection(HTTPSmartConnection, PushConnection["HTTPTransport"]):
@@ -136,28 +148,41 @@ class HTTPSmartPushConnection(HTTPSmartConnection, PushConnection["HTTPTransport
                 yield pkt.data
 
             if packfile is not None:
-                # logger.debug("Sending packfile")
+                logger.debug("Sending packfile")
                 await packfile.seek(0)
                 bytes_sent = 0
+                total_sent = 0
+                start_time = time.perf_counter()
                 async for chunk in packfile:
                     yield chunk
                     bytes_sent += len(chunk)
-                logger.debug("Packfile sent: %d bytes", bytes_sent)
+                    if bytes_sent > 32 * MEGABTE:
+                        end_time = time.perf_counter()
+                        total_sent += bytes_sent
+                        elapsed_seconds = end_time - start_time
+                        logger.debug(
+                            "Sent %.2f MB so far, current speed: %.2f MB/s",
+                            total_sent / MEGABTE,
+                            bytes_sent / (elapsed_seconds) / MEGABTE,
+                        )
+                        bytes_sent = 0
+                        start_time = time.perf_counter()
+
+                logger.debug("Packfile sent.")
             else:
                 logger.debug("No packfile to send")
 
         # Send a new HTTP POST request with the command
         url = self.transport.url + f"/{self._service}"
-        logger.debug("Sending command to %s", url)
+        logger.debug("Sending PUSH command to %s", url)
         response = await self._session.post(
             url,
-            read_until_eof=False,
-            read_bufsize=5000,
             headers={
                 "Content-Type": f"application/x-{self._service}-request",
                 "Cache-Control": "no-cache",
                 "Accept": f"application/x-{self._service}-result",
             },
+            timeout=http_timeout(),
             data=generate_command_data(),
         )
         logger.debug("Response: %s", response.headers)

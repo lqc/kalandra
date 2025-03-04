@@ -17,7 +17,7 @@ async def calculate_mirror_updates(mirror_refs: dict[str, str], upstream_refs: A
 
     async for ref in upstream_refs:
         if not ref.name.startswith("refs/heads/") and not ref.name.startswith("refs/tags/"):
-            logger.debug("Skipping %s, not a branch or tag", ref.name)
+            # logger.debug("Skipping %s, not a branch or tag", ref.name)
             refs_to_update.pop(ref.name, None)
             continue
 
@@ -67,7 +67,13 @@ async def update_mirror(
             else:
                 logger.info("No new objects to fetch, only deletes or updates")
 
+            # Make sure all objects are written to disk
+            await packfile.flush()
+
+            await packfile.seek(0, 2)
+            packfile_size = await packfile.tell()
+            logger.info("Downloaded packfile size: %.2f MB", packfile_size / 1024 / 1024)
+
             # Push objects to mirror
-            await packfile.seek(0)
             logger.info("Sending changes to mirror")
             await mirror_conn.push_changes(changes, packfile)

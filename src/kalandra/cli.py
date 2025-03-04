@@ -113,5 +113,5 @@ async def main(cmdline_args: list[str]) -> int:
         await update_mirror(source, target, dry_run=args.dry_run)
         return 0
     except Exception as e:
-        logger.error("Unexpected error: %s", e)
+        logger.error("Unexpected error while mirroring", exc_info=e)
         return 1
