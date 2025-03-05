@@ -75,7 +75,7 @@ GITHUB_RECEIVE_HELLO = b"""001f# service=git-receive-pack
 0042f0b710df22916ef01713e96b0d77abac50e45a6b refs/heads/publisher
 0000"""
 
-# Some versions of Gerrit are mission the "version 1" packet
+# Some versions of Gerrit are missing the "version 1" packet
 GERRIT_RECEIVE_HELLO = b"""001f# service=git-receive-pack
 000000baf8355e1c8022fb6825c0d901c5d8617297ff626e refs/heads/main\x00 side-band-64k delete-refs report-status quiet atomic ofs-delta push-options agent=JGit/v6.10.0.202406032230-r-73-gd5cc102e7
 003e28d140655d50e594417908cf4193e4387d05f6ff refs/meta/config
@@ -123,6 +123,12 @@ GERRIT_UPLOAD_HELLO = (
     b"000dversion 2000bls-refs0011fetch=shallow0011server-option0033agent=JGit/v6.10.0.202406032230-r-73-gd5cc102e70000"
 )
 
+GIT_V1_UPLOAD_HELLO = b"""001e# service=git-upload-pack
+0000000eversion 1
+010b9c03ab58a24d78d7a76347e049bc107dd629620f HEAD\x00multi_ack thin-pack side-band side-band-64k ofs-delta shallow deepen-since deepen-not deepen-relative no-progress include-tag multi_ack_detailed no-done symref=HEAD:refs/heads/main object-format=sha1 agent=git/2.46.0
+003d9c03ab58a24d78d7a76347e049bc107dd629620f refs/heads/main
+0000"""
+
 
 @pytest.mark.asyncio
 @pytest.mark.http_interactions(
@@ -164,4 +170,29 @@ async def test_http_fetch_hello_v2_gerrit(mocked_http_transport: HTTPTransport):
             "fetch=shallow",
             "server-option",
             "agent=JGit/v6.10.0.202406032230-r-73-gd5cc102e7",
+        }
+
+
+@pytest.mark.asyncio
+@pytest.mark.http_interactions(
+    MockResponse.create(200, {"Content-Type": "application/x-git-upload-pack-advertisement"}, GIT_V1_UPLOAD_HELLO),
+)
+async def test_http_fetch_hello_v1(mocked_http_transport: HTTPTransport):
+    async with mocked_http_transport.fetch() as connection:
+        assert connection.capabilities == {
+            "multi_ack",
+            "thin-pack",
+            "side-band",
+            "side-band-64k",
+            "ofs-delta",
+            "shallow",
+            "deepen-since",
+            "deepen-not",
+            "deepen-relative",
+            "no-progress",
+            "include-tag",
+            "multi_ack_detailed",
+            "no-done",
+            "symref=HEAD:refs/heads/main," "object-format=sha1",
+            "agent=git/2.46.0",
         }

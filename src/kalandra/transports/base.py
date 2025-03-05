@@ -404,7 +404,7 @@ class PushConnection[T: Transport](BaseConnection[T]):
         version_data = await self._read_header_packet(section)
         if not version_data.startswith("version "):
             # No version info, fallback to version 0
-            self._negotia
+            self._negotiated_protocol = 0
             # In protocol 0, the first packet is the first ref
             first_ref_extended = version_data
         else:
