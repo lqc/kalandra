@@ -23,7 +23,7 @@ class FileConnection(BaseConnection["FileTransport"]):
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=None,
-            env={"GIT_PROTOCOL": self.git_protocol},
+            env={"GIT_PROTOCOL": f"version={self.git_protocol}"},
         )
 
         if self.process.returncode is not None:

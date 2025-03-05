@@ -69,7 +69,7 @@ class BaseConnection[T: Transport]:
     transport: T
     reader: StreamReader | None
     writer: StreamWriter | None
-    git_protocol: str
+    git_protocol: int | None
 
     def __init__(self, *, transport: T):
         self.transport = transport
@@ -77,10 +77,17 @@ class BaseConnection[T: Transport]:
         self.reader = None
         self.writer = None
 
-        self.git_protocol = ""
+        self.git_protocol = None
+        self._negotiated_protocol = None
         self.last_packet: PacketLine | None = None
 
         self._shifted_packets: list[PacketLine] = []
+
+    @property
+    def negotiated_protocol(self) -> int | None:
+        if self._negotiated_protocol is not None:
+            return self._negotiated_protocol
+        return self.git_protocol
 
     @abstractmethod
     async def _close_service_connection(self) -> None:
@@ -172,7 +179,8 @@ class FetchConnection[T: Transport](BaseConnection[T]):
     def __init__(self, *, transport: T):
         super().__init__(transport=transport)
 
-        self.git_protocol = "version=2"
+        self.git_protocol = 2
+        self._negotiated_protocol = None
 
     @abstractmethod
     async def _open_fetch_service_connection(self) -> tuple[StreamReader, StreamWriter]:
@@ -186,11 +194,13 @@ class FetchConnection[T: Transport](BaseConnection[T]):
         assert self.writer is None
 
         self.reader, self.writer = await self._open_fetch_service_connection()
+        assert self.negotiated_protocol == 2, f"TODO: Implement protocol negotiation for {self.negotiated_protocol}"
 
         # Read the capabilities from the server (https://git-scm.com/docs/protocol-v2#_capability_advertisement)
         version_packet = await self._read_packet()
         if version_packet.data.strip() != b"version 2":
-            raise ValueError(f"Expected 'version 2' packet, instead got: {version_packet.data}")
+            logger.error(f"Expected 'version 2' packet, instead got: {version_packet.data}")
+            raise ValueError(f"Failed to open fetch connection to {self.transport.url}")
 
         advertised_capabilities: set[str] = set()
         async for packet in self._read_packets_until_flush():
@@ -371,7 +381,7 @@ class PushConnection[T: Transport](BaseConnection[T]):
         super().__init__(transport=transport)
 
         # git-receive-pack does not support protocol v2 yet, so make sure we use v1
-        self.git_protocol = "version=1"
+        self.git_protocol = 1
         self.refs = {}
 
     @abstractmethod
@@ -394,7 +404,7 @@ class PushConnection[T: Transport](BaseConnection[T]):
         version_data = await self._read_header_packet(section)
         if not version_data.startswith("version "):
             # No version info, fallback to version 0
-            self.git_protocol = ""
+            self._negotia
             # In protocol 0, the first packet is the first ref
             first_ref_extended = version_data
         else:

@@ -15,6 +15,12 @@ class CredentialProvider:
         return None  # pragma: no cover
 
 
+class NoopCredentialProvider(CredentialProvider):
+    """
+    A credential provider that does nothing.
+    """
+
+
 class NetrcCredentialProvider(CredentialProvider):
     """
     Resolve credentials using the .netrc file.

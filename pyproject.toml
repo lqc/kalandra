@@ -36,8 +36,10 @@ log_cli = true
 log_cli_level = "INFO"
 log_cli_format = "%(levelname)8s %(message)s"
 markers = ["http_interactions: mark test as requiring HTTP interactions"]
-
 testpaths = ['tests']
+
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 
 [tool.coverage.lcov]
 output = 'build/coverage.lcov'
