@@ -7,6 +7,7 @@ import logging
 import shutil
 from pathlib import Path
 
+import aiofiles
 import pytest
 from aiohttp import web
 
@@ -179,7 +180,10 @@ async def test_git_http_backend_kalandra_can_fetch_with_v2(git_http_endpoint: st
 
 @pytest.mark.asyncio
 async def test_git_http_backend_kalandra_can_fetch_with_v1(
-    git_http_endpoint: str, git_server: GitServer, monkeypatch: pytest.MonkeyPatch
+    git_http_endpoint: str,
+    git_server: GitServer,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ):
     """
     Test that our Git server mock works with "git clone".
@@ -191,7 +195,11 @@ async def test_git_http_backend_kalandra_can_fetch_with_v1(
         credentials_provider=NoopCredentialProvider(),
     )
 
+    packfile_path = tmp_path / "packfile.pack"
+
     async with transport.fetch() as conn:
         refs = sorted([x.name async for x in conn.ls_refs()])
 
-    assert refs == ["HEAD", "refs/heads/main"], "The repository was not cloned properly"
+        assert refs == ["HEAD", "refs/heads/main"], "The repository was not cloned properly"
+        async with aiofiles.open(packfile_path, "wb") as fd:
+            await conn.fetch_objects({"refs/heads/main"}, have=None, output=fd)

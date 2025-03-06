@@ -86,12 +86,9 @@ class HTTPSmartConnection(BaseConnection["HTTPTransport"]):
             if pkt.type == PacketLineType.DATA and pkt.data.rstrip() == b"version 2":
                 logger.debug("Server supports protocol version 2 (with quirks)")
                 self._negotiated_protocol = 2
-            elif pkt.type == PacketLineType.DATA and pkt.data.rstrip() == b"version 1":
-                logger.debug("Server supports protocol version 1")
-                self._negotiated_protocol = 1
             else:
-                logger.debug("Server does not support SMART protocol")
-                self._negotiated_protocol = 0
+                self._negotiated_protocol = 1
+                logger.debug("Server supports protocol version 1")
 
             # put the packet back in the buffer
             self._shift_packet(pkt)

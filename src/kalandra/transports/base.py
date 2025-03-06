@@ -164,6 +164,40 @@ class BaseConnection[T: Transport]:
             raise ValueError(f"Unexpected packet type: {header.type}: {header.data}")
         return header.data.decode("ascii").rstrip()
 
+    async def _read_v1_server_hello(self) -> tuple[dict[str, str], frozenset[str]]:
+        """
+        Process the first ref packet received from the server.
+
+        The first ref packet is special as it contains the capabilities of the server.
+        """
+        assert self.negotiated_protocol == 1
+
+        refs: dict[str, str] = {}
+
+        # Read the capabilities from the server (https://git-scm.com/docs/protocol-v2#_capability_advertisement)
+        section = self._read_packets_section()
+        version_data = await self._read_header_packet(section)
+
+        # In V1, the version packet is optional
+        if version_data.startswith("version "):
+            if version_data != "version 1":
+                raise ValueError(f"Expected 'version 1' packet, instead got: {version_data}")
+            # read next packet
+            first_ref_extended = await self._read_header_packet(section)
+        else:
+            first_ref_extended = version_data
+
+        first_ref_data, capabilities_list = first_ref_extended.split("\x00", 1)
+        first_ref = Ref.from_line(first_ref_data)
+        refs[first_ref.name] = first_ref.object_id
+
+        async for packet in section:
+            assert packet.type == PacketLineType.DATA
+            ref = Ref.from_line(packet.data.decode("ascii").rstrip())
+            refs[ref.name] = ref.object_id
+
+        return refs, frozenset(capabilities_list.split(" "))
+
 
 class FetchConnection[T: Transport](BaseConnection[T]):
     """
@@ -194,24 +228,42 @@ class FetchConnection[T: Transport](BaseConnection[T]):
         assert self.writer is None
 
         self.reader, self.writer = await self._open_fetch_service_connection()
-        assert self.negotiated_protocol == 2, f"TODO: Implement protocol negotiation for {self.negotiated_protocol}"
 
-        # Read the capabilities from the server (https://git-scm.com/docs/protocol-v2#_capability_advertisement)
+        if self.negotiated_protocol == 2:
+            await self._process_hello_v2()
+        elif self.negotiated_protocol == 1:
+            await self._process_hello_v1()
+
+        logger.debug(f"Connected with capabilities: {self.capabilities}")
+
+        # We expect the server to send us the capabilities and end with a flush packet
+        return self
+
+    async def _process_hello_v2(self):
+        """
+        Process the hello packet from the server when using Git Protocol V2.
+        """
         version_packet = await self._read_packet()
         if version_packet.data.strip() != b"version 2":
             logger.error(f"Expected 'version 2' packet, instead got: {version_packet.data}")
             raise ValueError(f"Failed to open fetch connection to {self.transport.url}")
 
+        # Read the capabilities from the server (https://git-scm.com/docs/protocol-v2#_capability_advertisement)
         advertised_capabilities: set[str] = set()
         async for packet in self._read_packets_until_flush():
             assert packet.type == PacketLineType.DATA
             advertised_capabilities.add(packet.data.decode("ascii").rstrip())
 
         self.capabilities = frozenset(advertised_capabilities)
-        logger.debug(f"Connected with capabilities: {self.capabilities}")
 
-        # We expect the server to send us the capabilities and end with a flush packet
-        return self
+    async def _process_hello_v1(self):
+        """
+        Process the hello packet from the server when using Git Protocol V1.
+        """
+        refs, advertised_capabilities = await self._read_v1_server_hello()
+
+        self.capabilities = frozenset(advertised_capabilities)
+        self._cached_refs = refs
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:  # type: ignore
         if self.writer:
@@ -285,8 +337,20 @@ class FetchConnection[T: Transport](BaseConnection[T]):
 
     async def ls_refs(self, prefix: str = "") -> AsyncIterator[Ref]:
         """
-        (Git Protocol V2) List references on the remote server.
+        List references on the remote server.
         """
+        if self.negotiated_protocol == 1:
+            assert self._cached_refs is not None
+
+            # Used cached refs from advertisement
+            for name, obj_id in self._cached_refs.items():
+                if prefix and not name.startswith(prefix):
+                    continue
+                yield Ref(name, obj_id)
+            return
+
+        assert self.negotiated_protocol == 2
+
         args: list[str] = []
         if prefix:
             args.append(f"ref-prefix {prefix}")
@@ -390,39 +454,6 @@ class PushConnection[T: Transport](BaseConnection[T]):
         Connect to the remote service and return the reader and writer.
         """
         pass
-
-    async def _read_v1_server_hello(self) -> tuple[dict[str, str], frozenset[str]]:
-        """
-        Process the first ref packet received from the server.
-
-        The first ref packet is special as it contains the capabilities of the server.
-        """
-        refs: dict[str, str] = {}
-
-        # Read the capabilities from the server (https://git-scm.com/docs/protocol-v2#_capability_advertisement)
-        section = self._read_packets_section()
-        version_data = await self._read_header_packet(section)
-        if not version_data.startswith("version "):
-            # No version info, fallback to version 0
-            self._negotiated_protocol = 0
-            # In protocol 0, the first packet is the first ref
-            first_ref_extended = version_data
-        else:
-            if version_data != "version 1":
-                raise ValueError(f"Expected 'version 1' packet, instead got: {version_data}")
-            # read next packet
-            first_ref_extended = await self._read_header_packet(section)
-
-        first_ref_data, capabilities_list = first_ref_extended.split("\x00", 1)
-        first_ref = Ref.from_line(first_ref_data)
-        refs[first_ref.name] = first_ref.object_id
-
-        async for packet in section:
-            assert packet.type == PacketLineType.DATA
-            ref = Ref.from_line(packet.data.decode("ascii").rstrip())
-            refs[ref.name] = ref.object_id
-
-        return refs, frozenset(capabilities_list.split(" "))
 
     async def __aenter__(self) -> "PushConnection[T]":
         assert self.reader is None

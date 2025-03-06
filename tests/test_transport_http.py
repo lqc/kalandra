@@ -193,6 +193,7 @@ async def test_http_fetch_hello_v1(mocked_http_transport: HTTPTransport):
             "include-tag",
             "multi_ack_detailed",
             "no-done",
-            "symref=HEAD:refs/heads/main," "object-format=sha1",
+            "symref=HEAD:refs/heads/main",
+            "object-format=sha1",
             "agent=git/2.46.0",
         }
