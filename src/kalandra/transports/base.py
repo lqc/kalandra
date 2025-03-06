@@ -324,20 +324,30 @@ class FetchConnection[T: Transport](BaseConnection[T]):
 
         yield PacketLine.FLUSH
 
+    async def _send_packet_transaction(self, packets: AsyncIterator[PacketLine]) -> None:
+        """
+        Send a series of packets to the server.
+
+        This is a hook method that can be overridden by subclasses to implement custom behavior.
+        """
+        assert self.writer is not None
+        async for packet in packets:
+            await self._write_packet(packet)
+
     async def _send_command_v2(
         self,
         command: str,
         args: Iterable[str],
         **capabilities: dict[str, str],
     ) -> None:
-        assert self.writer is not None
-
-        async for pkt in self._generate_command_v2(command, args, **capabilities):
-            await self._write_packet(pkt)
+        await self._send_packet_transaction(self._generate_command_v2(command, args, **capabilities))
 
     async def ls_refs(self, prefix: str = "") -> AsyncIterator[Ref]:
         """
         List references on the remote server.
+
+        For V1, the refs are cached from the advertisement packet.
+        For V2: https://git-scm.com/docs/gitprotocol-v2#_ls_refs
         """
         if self.negotiated_protocol == 1:
             assert self._cached_refs is not None
@@ -373,7 +383,88 @@ class FetchConnection[T: Transport](BaseConnection[T]):
         output: AsyncBufferedIOBase,
     ) -> None:
         """
+        Fetch objects from the remote server.
+        """
+        if self.negotiated_protocol == 1:
+            return await self._fetch_objects_v1(objects, have=have, output=output)
+
+        if self.negotiated_protocol == 2:
+            return await self._fetch_objects_v2(objects, have=have, output=output)
+
+        raise ConnectionException("Unsupported protocol version: %s" % self.negotiated_protocol)
+
+    async def _generate_fetch_v1_request(self, want: set[str], have: set[str] | None) -> AsyncIterator[PacketLine]:
+        capabilities: set[str] = set()
+        capabilities.add("agent=kaladra")
+
+        # TODO: support side-band in v1
+        # if "side-band-64k" in self.capabilities:
+        #     capabilities.add("side-band-64k")
+        # elif "side-band" in self.capabilities:
+        #     capabilities.add("side-band")
+
+        assert len(want) >= 1, "Expected at least one object to fetch"
+        want_iter = iter(want)
+
+        # Send first want + capabilities
+        obj = next(want_iter)
+        yield PacketLine.data_from_string(f"want {obj} {' '.join(sorted(capabilities))}")
+
+        # Send the rest of the wants
+        for obj in want_iter:
+            yield PacketLine.data_from_string("want %s" % obj)
+
+        # Send the oids of objects we have
+        if have:
+            for obj in have:
+                yield PacketLine.data_from_string("have %s" % obj)
+
+        # Send done
+        yield PacketLine.FLUSH
+        yield PacketLine.data_from_string("done")
+
+    async def _fetch_objects_v1(
+        self,
+        objects: set[str],
+        *,
+        have: set[str] | None = None,
+        output: AsyncBufferedIOBase,
+    ) -> None:
+        """
+        (Git Protocol V1) Fetch objects from the remote server.
+
+        Spec:
+
+        -   https://git-scm.com/docs/http-protocol#_smart_service_git_upload_pack
+        -   https://git-scm.com/docs/pack-protocol#_packfile_negotiation
+        """
+        await self._send_packet_transaction(self._generate_fetch_v1_request(objects, have))
+
+        assert self.reader is not None
+
+        pkt = await self._read_packet()
+        while pkt.data.startswith(b"ACK "):
+            # we will zero or more ACKs - we don't care about them
+            pkt = await self._read_packet()
+
+        if pkt.data.rstrip() != b"NAK":
+            raise ConnectionError("Expected NAK packet, instead got: %r" % pkt.data)
+
+        # The rest of the response is the packfile
+        async for chunk in self.reader:
+            await output.write(chunk)
+
+    async def _fetch_objects_v2(
+        self,
+        objects: set[str],
+        *,
+        have: set[str] | None = None,
+        output: AsyncBufferedIOBase,
+    ) -> None:
+        """
         (Git Protocol V2) Fetch objects from the remote server.
+
+        Spec: https://git-scm.com/docs/gitprotocol-v2#_fetch
         """
         # Send the command
         base_args = ()

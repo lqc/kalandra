@@ -2,7 +2,7 @@ import asyncio
 import logging
 import os
 import time
-from typing import AsyncIterator, Iterable, Literal
+from typing import AsyncIterator, Literal
 from urllib.parse import urlparse, urlunsplit
 
 import aiohttp
@@ -111,23 +111,18 @@ class HTTPSmartFetchConnection(HTTPSmartConnection, FetchConnection["HTTPTranspo
     async def _open_fetch_service_connection(self) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
         return await self._open_service_connection("git-upload-pack")
 
-    async def _send_command_v2(
-        self,
-        command: str,
-        args: Iterable[str],
-        **capabilities: dict[str, str],
-    ) -> None:
+    async def _send_packet_transaction(self, packets: AsyncIterator[PacketLine]) -> None:
         assert self.writer is None
         assert self._session is not None
 
         async def generate_command_data() -> AsyncIterator[bytes]:
-            async for pkt in self._generate_command_v2(command, args, **capabilities):
+            async for pkt in packets:
                 yield pkt.marker_bytes
                 yield pkt.data
 
         # Send a new HTTP POST request with the command
         url = self.transport.url + f"/{self._service}"
-        logger.debug("Sending FETCH command to %s", url)
+        logger.debug("Sending 'fetch' request %s", url)
         resp = await self._session.post(
             url,
             headers={
@@ -141,7 +136,7 @@ class HTTPSmartFetchConnection(HTTPSmartConnection, FetchConnection["HTTPTranspo
         )
 
         if resp.status != 200:
-            raise ConnectionException(f"Failed to send '{command}' command: {resp.reason} ({resp.status})")
+            raise ConnectionException(f"Failed to send packets: {resp.reason} ({resp.status})")
 
         self.reader = resp.content  # type: ignore
 

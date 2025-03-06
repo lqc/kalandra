@@ -64,7 +64,7 @@ class GitServer:
         if self.override_git_protocol is not None:
             git_cmd_env["GIT_PROTOCOL"] = self.override_git_protocol
 
-        logging.debug("Request Environment: %s", git_cmd_env)
+        logging.debug("[git-backend] request env: %r", git_cmd_env)
 
         backend = await asyncio.create_subprocess_exec(
             self.git_executable,
@@ -76,11 +76,12 @@ class GitServer:
         )
 
         body = await request.read()
+        logging.debug("[git-backend] request body: %r", body)
         stdout, stderr = await backend.communicate(body)
         if backend.returncode != 0:
             return web.Response(body=stderr, status=500)
 
-        logger.debug("git process response: %r", stdout)
+        logger.debug("[git-backend] response: %r", stdout)
         response_headers: dict[str, str] = {}
         index = 0
 
