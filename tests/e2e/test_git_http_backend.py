@@ -163,19 +163,15 @@ async def test_git_http_backend_mock_isclonable(git_http_endpoint: str, git_serv
 
 
 @pytest.mark.asyncio
-async def test_git_http_backend_kalandra_can_fetch_with_v2(git_http_endpoint: str, git_server: GitServer):
+async def test_git_http_backend_kalandra_can_fetch_with_v2(
+    git_http_endpoint: str,
+    git_server: GitServer,
+    tmp_path: Path,
+):
     """
     Test that our Git server mock works with "git clone".
     """
-    transport = HTTPTransport(
-        url=git_http_endpoint,
-        credentials_provider=NoopCredentialProvider(),
-    )
-
-    async with transport.fetch() as conn:
-        refs = sorted([x.name async for x in conn.ls_refs()])
-
-    assert refs == ["HEAD", "refs/heads/main"], "The repository was not cloned properly"
+    await fetch_all(git_http_endpoint, tmp_path)
 
 
 @pytest.mark.asyncio
@@ -190,6 +186,10 @@ async def test_git_http_backend_kalandra_can_fetch_with_v1(
     """
     monkeypatch.setattr(git_server, "override_git_protocol", "version=1")
 
+    await fetch_all(git_http_endpoint, tmp_path)
+
+
+async def fetch_all(git_http_endpoint: str, tmp_path: Path):
     transport = HTTPTransport(
         url=git_http_endpoint,
         credentials_provider=NoopCredentialProvider(),
@@ -198,8 +198,13 @@ async def test_git_http_backend_kalandra_can_fetch_with_v1(
     packfile_path = tmp_path / "packfile.pack"
 
     async with transport.fetch() as conn:
-        refs = sorted([x.name async for x in conn.ls_refs()])
+        refs = {ref.name: ref.object_id async for ref in conn.ls_refs()}
 
-        assert refs == ["HEAD", "refs/heads/main"], "The repository was not cloned properly"
+        assert sorted(refs.keys()) == ["HEAD", "refs/heads/main"], "The repository was not cloned properly"
+        main_oid = refs["refs/heads/main"]
+
         async with aiofiles.open(packfile_path, "wb") as fd:
-            await conn.fetch_objects({"refs/heads/main"}, have=None, output=fd)
+            await conn.fetch_objects({main_oid}, have=None, output=fd)
+
+        assert packfile_path.is_file(), "The packfile was not created"
+        assert packfile_path.stat().st_size > 0, "The packfile is empty"
