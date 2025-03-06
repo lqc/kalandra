@@ -41,7 +41,9 @@ class GitServer:
 
     async def init_repo(self):
         self.repo_path.mkdir(parents=True)
-        await async_exec(self.git_executable, "init", cwd=self.repo_path)
+        await async_exec(self.git_executable, "init", "-b", "main", cwd=self.repo_path)
+        await async_exec(self.git_executable, "config", "user.email", "kalandra-test@syncron.test", cwd=self.repo_path)
+        await async_exec(self.git_executable, "config", "user.name", "kalandra-test", cwd=self.repo_path)
         (self.repo_path / "README.md").write_text("Hello, world!")
         await async_exec(self.git_executable, "add", ":/", cwd=self.repo_path)
         await async_exec(self.git_executable, "commit", "-m", "Initial Commit", cwd=self.repo_path)
