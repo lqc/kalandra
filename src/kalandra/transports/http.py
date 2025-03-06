@@ -123,22 +123,25 @@ class HTTPSmartFetchConnection(HTTPSmartConnection, FetchConnection["HTTPTranspo
         # Send a new HTTP POST request with the command
         url = self.transport.url + f"/{self._service}"
         logger.debug("Sending 'fetch' request %s", url)
-        resp = await self._session.post(
+        response = await self._session.post(
             url,
             headers={
                 "Content-Type": f"application/x-{self._service}-request",
                 "Cache-Control": "no-cache",
-                "Accept": f"application/x-{self._service}-result",
+                "Accept": f"application/x-{self._service}-result, */*",
                 "Git-Protocol": f"version={self.negotiated_protocol}",
             },
             data=generate_command_data(),
             timeout=http_timeout(),
         )
 
-        if resp.status != 200:
-            raise ConnectionException(f"Failed to send packets: {resp.reason} ({resp.status})")
+        if response.status != 200:
+            logger.error("Error response: %s", await response.text())
+            raise ConnectionException(f"Failed to send packets: {response.reason} ({response.status})")
 
-        self.reader = resp.content  # type: ignore
+        logger.debug("Request complete, got: %s", response.headers)
+
+        self.reader = response.content  # type: ignore
 
 
 MEGABTE = 1024 * 1024
@@ -194,14 +197,14 @@ class HTTPSmartPushConnection(HTTPSmartConnection, PushConnection["HTTPTransport
             headers={
                 "Content-Type": f"application/x-{self._service}-request",
                 "Cache-Control": "no-cache",
-                "Accept": f"application/x-{self._service}-result",
+                "Accept": f"application/x-{self._service}-result, */*",
                 "Git-Protocol": f"version={self.negotiated_protocol}",
             },
             timeout=http_timeout(),
             data=generate_command_data(),
         )
-        logger.debug("Response: %s", response.headers)
         if response.status != 200:
+            logger.error("Error response: %s", await response.text())
             raise ConnectionException(f"Request failed: {response.status}: {response.reason}")
 
         self.reader = response.content  # type: ignore

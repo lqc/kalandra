@@ -7,7 +7,7 @@ from typing import AsyncIterator, Iterable
 from aiofiles.threadpool.binary import AsyncBufferedIOBase
 
 from kalandra.auth.basic import CredentialProvider
-from kalandra.gitprotocol import PacketLine, PacketLineType, Ref, RefChange
+from kalandra.gitprotocol import NULL_OBJECT_ID, PacketLine, PacketLineType, Ref, RefChange
 
 logger = logging.getLogger(__name__)
 
@@ -198,6 +198,12 @@ class BaseConnection[T: Transport]:
 
         return refs, frozenset(capabilities_list.split(" "))
 
+    def _add_capability_if_supported(self, in_use: set[str], capability: str) -> bool:
+        if capability in self.capabilities:
+            in_use.add(capability)
+            return True
+        return False
+
 
 class FetchConnection[T: Transport](BaseConnection[T]):
     """
@@ -352,6 +358,8 @@ class FetchConnection[T: Transport](BaseConnection[T]):
         if self.negotiated_protocol == 1:
             assert self._cached_refs is not None
 
+            logger.debug("Using cached refs from advertisement: %s", self._cached_refs)
+
             # Used cached refs from advertisement
             for name, obj_id in self._cached_refs.items():
                 if prefix and not name.startswith(prefix):
@@ -395,13 +403,13 @@ class FetchConnection[T: Transport](BaseConnection[T]):
 
     async def _generate_fetch_v1_request(self, want: set[str], have: set[str] | None) -> AsyncIterator[PacketLine]:
         capabilities: set[str] = set()
-        capabilities.add("agent=kaladra")
+        capabilities.add("agent=kalandra")
+
+        self._add_capability_if_supported(capabilities, "multi_ack_detailed")
 
         # TODO: support side-band in v1
-        # if "side-band-64k" in self.capabilities:
-        #     capabilities.add("side-band-64k")
-        # elif "side-band" in self.capabilities:
-        #     capabilities.add("side-band")
+        # if not self._add_capability_if_supported(capabilities, "side-band-64k"):
+        #     self._add_capability_if_supported(capabilities, "side-band")
 
         assert len(want) >= 1, "Expected at least one object to fetch"
         want_iter = iter(want)
@@ -417,6 +425,9 @@ class FetchConnection[T: Transport](BaseConnection[T]):
         # Send the oids of objects we have
         if have:
             for obj in have:
+                # Make sure we don't send NULL_OBJECT_ID by mistake
+                if obj == NULL_OBJECT_ID:
+                    continue
                 yield PacketLine.data_from_string("have %s" % obj)
 
         # Send done
@@ -453,6 +464,8 @@ class FetchConnection[T: Transport](BaseConnection[T]):
         # The rest of the response is the packfile
         async for chunk in self.reader:
             await output.write(chunk)
+
+        await output.flush()
 
     async def _fetch_objects_v2(
         self,
@@ -577,12 +590,6 @@ class PushConnection[T: Transport](BaseConnection[T]):
             self.writer = None
 
         await self._close_service_connection()
-
-    def _add_capability_if_supported(self, in_use: set[str], capability: str) -> bool:
-        if capability in self.capabilities:
-            in_use.add(capability)
-            return True
-        return False
 
     async def _generate_receive_commands(
         self,

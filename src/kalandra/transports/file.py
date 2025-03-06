@@ -22,7 +22,7 @@ class FileConnection(BaseConnection["FileTransport"]):
             self.transport.path,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
-            stderr=None,
+            stderr=asyncio.subprocess.PIPE,
             env={"GIT_PROTOCOL": f"version={self.git_protocol}"},
         )
 
@@ -32,13 +32,24 @@ class FileConnection(BaseConnection["FileTransport"]):
 
         assert self.process.stdout is not None
         assert self.process.stdin is not None
+        assert self.process.stderr is not None
+
+        # We don't need stderr, so we can just read it in the background
+        self._err_task = asyncio.create_task(self.log_error_messages(self.process.stderr))
 
         return (self.process.stdout, self.process.stdin)
+
+    async def log_error_messages(self, stream: asyncio.StreamReader) -> None:
+        async for line in stream:
+            logger.error(f"Error: {line.decode()}")
 
     async def _close_service_connection(self) -> None:
         if self.process.returncode is None:
             self.process.terminate()
         await self.process.wait()
+
+        self._err_task.cancel()
+        await self._err_task
 
 
 class FileFetchConnection(FileConnection, FetchConnection["FileTransport"]):
