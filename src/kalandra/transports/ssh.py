@@ -42,7 +42,7 @@ class SSHConnection(BaseConnection["SSHTransport"]):
             # run the git-upload-pack command
             self._process = await self._ssh.create_process(
                 f"{service_name} {self.transport.path}",
-                env={"GIT_PROTOCOL": self.git_protocol},
+                env={"GIT_PROTOCOL": f"version={self.git_protocol}"},
                 encoding=None,
             )
 

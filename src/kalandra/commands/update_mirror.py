@@ -46,10 +46,13 @@ async def calculate_mirror_updates(
         yield RefChange(ref, old_id, NULL_OBJECT_ID)
 
 
-def create_glob_filter(*globs: str) -> Callable[[str], bool]:
+def create_glob_filter(*globs: str) -> Callable[[str], bool] | None:
     """
     Create a filter that matches the given globs.
     """
+    if not globs:
+        return None
+
     regex = re.compile("|".join(fnmatch.translate(glob) for glob in globs))
 
     def filter_func(name: str) -> bool:

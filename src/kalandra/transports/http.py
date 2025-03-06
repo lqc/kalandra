@@ -2,7 +2,7 @@ import asyncio
 import logging
 import os
 import time
-from typing import AsyncIterator, Iterable, Literal
+from typing import AsyncIterator, Literal
 from urllib.parse import urlparse, urlunsplit
 
 import aiohttp
@@ -44,7 +44,6 @@ class HTTPSmartConnection(BaseConnection["HTTPTransport"]):
 
         self._session = self.transport.session_factory(
             headers={
-                "Git-Protocol": self.git_protocol,
                 "User-Agent": "git/2.46.0",
             },
             auth=aiohttp.BasicAuth(*credentials) if credentials else None,
@@ -56,7 +55,10 @@ class HTTPSmartConnection(BaseConnection["HTTPTransport"]):
         logger.debug("Connecting to %s, protocol %s", service_url, self.git_protocol)
         hello_resp = await self._session.get(
             service_url,
-            headers={"Accept": f"application/x-{service_name}-advertisement"},
+            headers={
+                "Accept": f"application/x-{service_name}-advertisement",
+                "Git-Protocol": f"version={self.git_protocol}",
+            },
         )
 
         if hello_resp.status != 200:
@@ -71,16 +73,32 @@ class HTTPSmartConnection(BaseConnection["HTTPTransport"]):
         self.reader = hello_resp.content  # type: ignore
 
         header = await self._read_packet()
-        if header.data != f"# service={service_name}\n".encode("ascii"):
-            if service_name == "git-upload-pack" and header.data == b"version 2":
-                # JGit servers do not send the service name, but they do send the version immediately
-                logger.warning("JGit server did not send service name, assuming git-upload-pack")
-                self._shift_packet(header)
-            else:
-                raise ConnectionException(f"Smart protocol requires service header, instead got: {header}")
-        else:
+
+        if header.type != PacketLineType.DATA:
+            raise ConnectionException(f"Expected data packet, got {header}")
+
+        if header.data == f"# service={service_name}\n".encode("ascii"):
+            # The server sent the service name. GitHub does this event for v2, so we need to read the next packet
             pkt = await self._read_packet()
             assert pkt.type == PacketLineType.FLUSH, "Expected flush after service header, got %r" % pkt
+
+            pkt = await self._read_packet()
+            if pkt.type == PacketLineType.DATA and pkt.data.rstrip() == b"version 2":
+                logger.debug("Server supports protocol version 2 (with quirks)")
+                self._negotiated_protocol = 2
+            else:
+                self._negotiated_protocol = 1
+                logger.debug("Server supports protocol version 1")
+
+            # put the packet back in the buffer
+            self._shift_packet(pkt)
+
+        elif header.data.rstrip() == b"version 2":
+            logger.debug("Server supports protocol version 2")
+            self._negotiated_protocol = 2
+            self._shift_packet(header)
+        else:
+            raise ConnectionException(f"Expected service header or version packet, instead got: {header}")
 
         return hello_resp.content, None  # type: ignore
 
@@ -93,38 +111,37 @@ class HTTPSmartFetchConnection(HTTPSmartConnection, FetchConnection["HTTPTranspo
     async def _open_fetch_service_connection(self) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
         return await self._open_service_connection("git-upload-pack")
 
-    async def _send_command_v2(
-        self,
-        command: str,
-        args: Iterable[str],
-        **capabilities: dict[str, str],
-    ) -> None:
+    async def _send_packet_transaction(self, packets: AsyncIterator[PacketLine]) -> None:
         assert self.writer is None
         assert self._session is not None
 
         async def generate_command_data() -> AsyncIterator[bytes]:
-            async for pkt in self._generate_command_v2(command, args, **capabilities):
+            async for pkt in packets:
                 yield pkt.marker_bytes
                 yield pkt.data
 
         # Send a new HTTP POST request with the command
         url = self.transport.url + f"/{self._service}"
-        logger.debug("Sending FETCH command to %s", url)
-        resp = await self._session.post(
+        logger.debug("Sending 'fetch' request %s", url)
+        response = await self._session.post(
             url,
             headers={
                 "Content-Type": f"application/x-{self._service}-request",
                 "Cache-Control": "no-cache",
-                "Accept": f"application/x-{self._service}-result",
+                "Accept": f"application/x-{self._service}-result, */*",
+                "Git-Protocol": f"version={self.negotiated_protocol}",
             },
             data=generate_command_data(),
             timeout=http_timeout(),
         )
 
-        if resp.status != 200:
-            raise ConnectionException(f"Failed to send '{command}' command: {resp.reason} ({resp.status})")
+        if response.status != 200:
+            logger.error("Error response: %s", await response.text())
+            raise ConnectionException(f"Failed to send packets: {response.reason} ({response.status})")
 
-        self.reader = resp.content  # type: ignore
+        logger.debug("Request complete, got: %s", response.headers)
+
+        self.reader = response.content  # type: ignore
 
 
 MEGABTE = 1024 * 1024
@@ -180,13 +197,14 @@ class HTTPSmartPushConnection(HTTPSmartConnection, PushConnection["HTTPTransport
             headers={
                 "Content-Type": f"application/x-{self._service}-request",
                 "Cache-Control": "no-cache",
-                "Accept": f"application/x-{self._service}-result",
+                "Accept": f"application/x-{self._service}-result, */*",
+                "Git-Protocol": f"version={self.negotiated_protocol}",
             },
             timeout=http_timeout(),
             data=generate_command_data(),
         )
-        logger.debug("Response: %s", response.headers)
         if response.status != 200:
+            logger.error("Error response: %s", await response.text())
             raise ConnectionException(f"Request failed: {response.status}: {response.reason}")
 
         self.reader = response.content  # type: ignore

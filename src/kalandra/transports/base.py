@@ -7,7 +7,7 @@ from typing import AsyncIterator, Iterable
 from aiofiles.threadpool.binary import AsyncBufferedIOBase
 
 from kalandra.auth.basic import CredentialProvider
-from kalandra.gitprotocol import PacketLine, PacketLineType, Ref, RefChange
+from kalandra.gitprotocol import NULL_OBJECT_ID, PacketLine, PacketLineType, Ref, RefChange
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +69,7 @@ class BaseConnection[T: Transport]:
     transport: T
     reader: StreamReader | None
     writer: StreamWriter | None
-    git_protocol: str
+    git_protocol: int | None
 
     def __init__(self, *, transport: T):
         self.transport = transport
@@ -77,10 +77,17 @@ class BaseConnection[T: Transport]:
         self.reader = None
         self.writer = None
 
-        self.git_protocol = ""
+        self.git_protocol = None
+        self._negotiated_protocol = None
         self.last_packet: PacketLine | None = None
 
         self._shifted_packets: list[PacketLine] = []
+
+    @property
+    def negotiated_protocol(self) -> int | None:
+        if self._negotiated_protocol is not None:
+            return self._negotiated_protocol
+        return self.git_protocol
 
     @abstractmethod
     async def _close_service_connection(self) -> None:
@@ -157,6 +164,46 @@ class BaseConnection[T: Transport]:
             raise ValueError(f"Unexpected packet type: {header.type}: {header.data}")
         return header.data.decode("ascii").rstrip()
 
+    async def _read_v1_server_hello(self) -> tuple[dict[str, str], frozenset[str]]:
+        """
+        Process the first ref packet received from the server.
+
+        The first ref packet is special as it contains the capabilities of the server.
+        """
+        assert self.negotiated_protocol == 1
+
+        refs: dict[str, str] = {}
+
+        # Read the capabilities from the server (https://git-scm.com/docs/protocol-v2#_capability_advertisement)
+        section = self._read_packets_section()
+        version_data = await self._read_header_packet(section)
+
+        # In V1, the version packet is optional
+        if version_data.startswith("version "):
+            if version_data != "version 1":
+                raise ValueError(f"Expected 'version 1' packet, instead got: {version_data}")
+            # read next packet
+            first_ref_extended = await self._read_header_packet(section)
+        else:
+            first_ref_extended = version_data
+
+        first_ref_data, capabilities_list = first_ref_extended.split("\x00", 1)
+        first_ref = Ref.from_line(first_ref_data)
+        refs[first_ref.name] = first_ref.object_id
+
+        async for packet in section:
+            assert packet.type == PacketLineType.DATA
+            ref = Ref.from_line(packet.data.decode("ascii").rstrip())
+            refs[ref.name] = ref.object_id
+
+        return refs, frozenset(capabilities_list.split(" "))
+
+    def _add_capability_if_supported(self, in_use: set[str], capability: str) -> bool:
+        if capability in self.capabilities:
+            in_use.add(capability)
+            return True
+        return False
+
 
 class FetchConnection[T: Transport](BaseConnection[T]):
     """
@@ -172,7 +219,8 @@ class FetchConnection[T: Transport](BaseConnection[T]):
     def __init__(self, *, transport: T):
         super().__init__(transport=transport)
 
-        self.git_protocol = "version=2"
+        self.git_protocol = 2
+        self._negotiated_protocol = None
 
     @abstractmethod
     async def _open_fetch_service_connection(self) -> tuple[StreamReader, StreamWriter]:
@@ -187,21 +235,41 @@ class FetchConnection[T: Transport](BaseConnection[T]):
 
         self.reader, self.writer = await self._open_fetch_service_connection()
 
-        # Read the capabilities from the server (https://git-scm.com/docs/protocol-v2#_capability_advertisement)
+        if self.negotiated_protocol == 2:
+            await self._process_hello_v2()
+        elif self.negotiated_protocol == 1:
+            await self._process_hello_v1()
+
+        logger.debug(f"Connected with capabilities: {self.capabilities}")
+
+        # We expect the server to send us the capabilities and end with a flush packet
+        return self
+
+    async def _process_hello_v2(self):
+        """
+        Process the hello packet from the server when using Git Protocol V2.
+        """
         version_packet = await self._read_packet()
         if version_packet.data.strip() != b"version 2":
-            raise ValueError(f"Expected 'version 2' packet, instead got: {version_packet.data}")
+            logger.error(f"Expected 'version 2' packet, instead got: {version_packet.data}")
+            raise ValueError(f"Failed to open fetch connection to {self.transport.url}")
 
+        # Read the capabilities from the server (https://git-scm.com/docs/protocol-v2#_capability_advertisement)
         advertised_capabilities: set[str] = set()
         async for packet in self._read_packets_until_flush():
             assert packet.type == PacketLineType.DATA
             advertised_capabilities.add(packet.data.decode("ascii").rstrip())
 
         self.capabilities = frozenset(advertised_capabilities)
-        logger.debug(f"Connected with capabilities: {self.capabilities}")
 
-        # We expect the server to send us the capabilities and end with a flush packet
-        return self
+    async def _process_hello_v1(self):
+        """
+        Process the hello packet from the server when using Git Protocol V1.
+        """
+        refs, advertised_capabilities = await self._read_v1_server_hello()
+
+        self.capabilities = frozenset(advertised_capabilities)
+        self._cached_refs = refs
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:  # type: ignore
         if self.writer:
@@ -262,21 +330,45 @@ class FetchConnection[T: Transport](BaseConnection[T]):
 
         yield PacketLine.FLUSH
 
+    async def _send_packet_transaction(self, packets: AsyncIterator[PacketLine]) -> None:
+        """
+        Send a series of packets to the server.
+
+        This is a hook method that can be overridden by subclasses to implement custom behavior.
+        """
+        assert self.writer is not None
+        async for packet in packets:
+            await self._write_packet(packet)
+
     async def _send_command_v2(
         self,
         command: str,
         args: Iterable[str],
         **capabilities: dict[str, str],
     ) -> None:
-        assert self.writer is not None
-
-        async for pkt in self._generate_command_v2(command, args, **capabilities):
-            await self._write_packet(pkt)
+        await self._send_packet_transaction(self._generate_command_v2(command, args, **capabilities))
 
     async def ls_refs(self, prefix: str = "") -> AsyncIterator[Ref]:
         """
-        (Git Protocol V2) List references on the remote server.
+        List references on the remote server.
+
+        For V1, the refs are cached from the advertisement packet.
+        For V2: https://git-scm.com/docs/gitprotocol-v2#_ls_refs
         """
+        if self.negotiated_protocol == 1:
+            assert self._cached_refs is not None
+
+            logger.debug("Using cached refs from advertisement: %s", self._cached_refs)
+
+            # Used cached refs from advertisement
+            for name, obj_id in self._cached_refs.items():
+                if prefix and not name.startswith(prefix):
+                    continue
+                yield Ref(name, obj_id)
+            return
+
+        assert self.negotiated_protocol == 2
+
         args: list[str] = []
         if prefix:
             args.append(f"ref-prefix {prefix}")
@@ -299,7 +391,93 @@ class FetchConnection[T: Transport](BaseConnection[T]):
         output: AsyncBufferedIOBase,
     ) -> None:
         """
+        Fetch objects from the remote server.
+        """
+        if self.negotiated_protocol == 1:
+            return await self._fetch_objects_v1(objects, have=have, output=output)
+
+        if self.negotiated_protocol == 2:
+            return await self._fetch_objects_v2(objects, have=have, output=output)
+
+        raise ConnectionException("Unsupported protocol version: %s" % self.negotiated_protocol)
+
+    async def _generate_fetch_v1_request(self, want: set[str], have: set[str] | None) -> AsyncIterator[PacketLine]:
+        capabilities: set[str] = set()
+        capabilities.add("agent=kalandra")
+
+        self._add_capability_if_supported(capabilities, "multi_ack_detailed")
+
+        # TODO: support side-band in v1
+        # if not self._add_capability_if_supported(capabilities, "side-band-64k"):
+        #     self._add_capability_if_supported(capabilities, "side-band")
+
+        assert len(want) >= 1, "Expected at least one object to fetch"
+        want_iter = iter(want)
+
+        # Send first want + capabilities
+        obj = next(want_iter)
+        yield PacketLine.data_from_string(f"want {obj} {' '.join(sorted(capabilities))}")
+
+        # Send the rest of the wants
+        for obj in want_iter:
+            yield PacketLine.data_from_string("want %s" % obj)
+
+        # Send the oids of objects we have
+        if have:
+            for obj in have:
+                # Make sure we don't send NULL_OBJECT_ID by mistake
+                if obj == NULL_OBJECT_ID:
+                    continue
+                yield PacketLine.data_from_string("have %s" % obj)
+
+        # Send done
+        yield PacketLine.FLUSH
+        yield PacketLine.data_from_string("done")
+
+    async def _fetch_objects_v1(
+        self,
+        objects: set[str],
+        *,
+        have: set[str] | None = None,
+        output: AsyncBufferedIOBase,
+    ) -> None:
+        """
+        (Git Protocol V1) Fetch objects from the remote server.
+
+        Spec:
+
+        -   https://git-scm.com/docs/http-protocol#_smart_service_git_upload_pack
+        -   https://git-scm.com/docs/pack-protocol#_packfile_negotiation
+        """
+        await self._send_packet_transaction(self._generate_fetch_v1_request(objects, have))
+
+        assert self.reader is not None
+
+        pkt = await self._read_packet()
+        while pkt.data.startswith(b"ACK "):
+            # we will zero or more ACKs - we don't care about them
+            pkt = await self._read_packet()
+
+        if pkt.data.rstrip() != b"NAK":
+            raise ConnectionError("Expected NAK packet, instead got: %r" % pkt.data)
+
+        # The rest of the response is the packfile
+        async for chunk in self.reader:
+            await output.write(chunk)
+
+        await output.flush()
+
+    async def _fetch_objects_v2(
+        self,
+        objects: set[str],
+        *,
+        have: set[str] | None = None,
+        output: AsyncBufferedIOBase,
+    ) -> None:
+        """
         (Git Protocol V2) Fetch objects from the remote server.
+
+        Spec: https://git-scm.com/docs/gitprotocol-v2#_fetch
         """
         # Send the command
         base_args = ()
@@ -371,7 +549,7 @@ class PushConnection[T: Transport](BaseConnection[T]):
         super().__init__(transport=transport)
 
         # git-receive-pack does not support protocol v2 yet, so make sure we use v1
-        self.git_protocol = "version=1"
+        self.git_protocol = 1
         self.refs = {}
 
     @abstractmethod
@@ -380,39 +558,6 @@ class PushConnection[T: Transport](BaseConnection[T]):
         Connect to the remote service and return the reader and writer.
         """
         pass
-
-    async def _read_v1_server_hello(self) -> tuple[dict[str, str], frozenset[str]]:
-        """
-        Process the first ref packet received from the server.
-
-        The first ref packet is special as it contains the capabilities of the server.
-        """
-        refs: dict[str, str] = {}
-
-        # Read the capabilities from the server (https://git-scm.com/docs/protocol-v2#_capability_advertisement)
-        section = self._read_packets_section()
-        version_data = await self._read_header_packet(section)
-        if not version_data.startswith("version "):
-            # No version info, fallback to version 0
-            self.git_protocol = ""
-            # In protocol 0, the first packet is the first ref
-            first_ref_extended = version_data
-        else:
-            if version_data != "version 1":
-                raise ValueError(f"Expected 'version 1' packet, instead got: {version_data}")
-            # read next packet
-            first_ref_extended = await self._read_header_packet(section)
-
-        first_ref_data, capabilities_list = first_ref_extended.split("\x00", 1)
-        first_ref = Ref.from_line(first_ref_data)
-        refs[first_ref.name] = first_ref.object_id
-
-        async for packet in section:
-            assert packet.type == PacketLineType.DATA
-            ref = Ref.from_line(packet.data.decode("ascii").rstrip())
-            refs[ref.name] = ref.object_id
-
-        return refs, frozenset(capabilities_list.split(" "))
 
     async def __aenter__(self) -> "PushConnection[T]":
         assert self.reader is None
@@ -445,12 +590,6 @@ class PushConnection[T: Transport](BaseConnection[T]):
             self.writer = None
 
         await self._close_service_connection()
-
-    def _add_capability_if_supported(self, in_use: set[str], capability: str) -> bool:
-        if capability in self.capabilities:
-            in_use.add(capability)
-            return True
-        return False
 
     async def _generate_receive_commands(
         self,
