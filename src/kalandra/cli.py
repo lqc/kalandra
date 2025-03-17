@@ -115,13 +115,26 @@ async def main(cmdline_args: list[str]) -> int:
 
         logger.info("Looking up source URL from target repository")
 
-        source_url = await github_api.get_repo_property(
-            repo_url=args.target,
-            property_name=args.source[len("target-prop:") :],
-        )
-        if source_url is None:
+        props = await github_api.get_repo_properties(args.target)
+        source_prop_name = args.source[len("target-prop:") :]
+
+        if source_prop_name not in props:
             logger.error("Property %s not found in target repository", args.source)
             return 1
+
+        source_prop_value = props[source_prop_name]
+        if source_prop_value.startswith("/"):
+            # Assume it's a relative path and lookup host from another prop
+            if f"{source_prop_name}-host" not in props:
+                logger.error(
+                    "Source property is relative, but no %s-host not found in target repository: %s",
+                    args.source,
+                    source_prop_value,
+                )
+                return 1
+            source_url = props[f"{source_prop_name}-host"] + source_prop_value
+        else:
+            source_url = source_prop_value
 
     source = Transport.from_url(source_url, credentials_provider=credentials_provider)
     target = Transport.from_url(args.target, credentials_provider=credentials_provider)
