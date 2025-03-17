@@ -49,11 +49,10 @@ class GithubAPI:
 
         return github.Github(auth=self._auth.get_installation_auth(installation_id))
 
-    async def get_repo_property(
+    async def get_repo_properties(
         self,
         repo_url: str,
-        property_name: str,
-    ) -> None | str:
+    ) -> dict[str, str]:
         url = urlparse(repo_url)
 
         path_parts = url.path.strip("/").split("/")
@@ -62,13 +61,15 @@ class GithubAPI:
         if repo_name.endswith(".git"):
             repo_name = repo_name[:-4]
 
-        logging.info("Looking up property %s for org '%s' and repo '%s'", property_name, org, repo_name)
         api = self.get_org_api(org)
         repo = api.get_repo(f"{org}/{repo_name}")
-        value = repo.get_custom_properties().get(property_name, None)  # type: ignore
-        if value is not None and not isinstance(value, str):
-            raise ValueError(f"Property {property_name} is not a string: {value}")
-        return value
+
+        values: dict[str, str] = {}
+        for key, value in repo.custom_properties.items():  # type: ignore
+            if isinstance(value, str):
+                values[key] = value
+
+        return values
 
     def crendentials_provider_for_org(self, org: str) -> GitHubAppCredentialProvider:
         installation_id = self.get_installation_id(org)
