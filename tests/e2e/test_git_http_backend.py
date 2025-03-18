@@ -47,6 +47,7 @@ class GitServer:
         (self.repo_path / "README.md").write_text("Hello, world!")
         await async_exec(self.git_executable, "add", ":/", cwd=self.repo_path)
         await async_exec(self.git_executable, "commit", "-m", "Initial Commit", cwd=self.repo_path)
+        await async_exec(self.git_executable, "tag", "-a", "-m", "Annotated Tag", "test", cwd=self.repo_path)
 
     async def serve_git_request(self, request: web.Request):
         path = request.match_info["path"].lstrip("/")
@@ -203,7 +204,11 @@ async def fetch_all(git_http_endpoint: str, tmp_path: Path):
     async with transport.fetch() as conn:
         refs = {ref.name: ref.object_id async for ref in conn.ls_refs()}
 
-        assert sorted(refs.keys()) == ["HEAD", "refs/heads/main"], "The repository was not cloned properly"
+        assert sorted(refs.keys()) == [
+            "HEAD",
+            "refs/heads/main",
+            "refs/tags/test",
+        ], "The repository was not cloned properly"
         main_oid = refs["refs/heads/main"]
 
         async with aiofiles.open(packfile_path, "wb") as fd:
