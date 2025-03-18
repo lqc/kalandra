@@ -78,7 +78,7 @@ class HTTPSmartConnection(BaseConnection["HTTPTransport"]):
             raise ConnectionException(f"Expected data packet, got {header}")
 
         if header.data == f"# service={service_name}\n".encode("ascii"):
-            # The server sent the service name. GitHub does this event for v2, so we need to read the next packet
+            # The server sent the service name. GitHub does this even for v2, so we need to read the next packet
             pkt = await self._read_packet()
             assert pkt.type == PacketLineType.FLUSH, "Expected flush after service header, got %r" % pkt
 
