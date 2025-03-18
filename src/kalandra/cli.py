@@ -147,7 +147,8 @@ async def main(cmdline_args: list[str]) -> int:
             include_filter=include_filter,
             exclude_filter=exclude_filter,
         )
+        logger.info("Update successful.", extra={"source": source_url, "target": args.target})
         return 0
     except Exception as e:
-        logger.error("Unexpected error while mirroring", exc_info=e)
+        logger.info("Update failed.", extra={"source": source_url, "target": args.target}, exc_info=e)
         return 1

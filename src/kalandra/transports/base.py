@@ -18,6 +18,14 @@ class ConnectionException(Exception):
     pass
 
 
+class ServerError(Exception):
+    """
+    The server returned an error response.
+    """
+
+    pass
+
+
 class Transport(metaclass=ABCMeta):
     def __init__(self, *, url: str, credentials_provider: CredentialProvider):
         self._url = url
@@ -662,6 +670,19 @@ class PushConnection[T: Transport](BaseConnection[T]):
         if packfile is not None:
             await self._send_packfile(packfile)
 
+    def _handle_report_message(self, message: str) -> None | str:
+        if message.startswith("unpack ok"):
+            logger.info("Unpack OK")
+            return
+
+        if message.startswith("ok "):
+            # Ref update was successful
+            return
+
+        if message.startswith("ng "):
+            # Ref update failed
+            return message[3:]
+
     async def push_changes(self, changes: list[RefChange], packfile: AsyncBufferedIOBase | None) -> None:
         """
         (Git Protocol V1) Send changes to the remote server.
@@ -669,21 +690,31 @@ class PushConnection[T: Transport](BaseConnection[T]):
         @see: https://git-scm.com/docs/gitprotocol-pack#_pushing_data_to_a_server
         """
         used_capabilities, packets, packfile_to_send = await self._push_request_v1(changes, packfile)
-
         await self._send_commands(packets, packfile_to_send)
 
-        # Try to read the report-status
         if "report-status" in used_capabilities:
             logger.info("Reading report-status")
+            # Try to read the report-status
+            push_errors: list[str] = []
+
             async for packet in self._read_packets_until_flush():
                 assert packet.type == PacketLineType.DATA
                 channel = int(packet.data[0])
-
                 if channel == 2:
-                    logger.info("[%d] %r", channel, packet.data.decode("utf-8", "replace"))
+                    message = packet.data[1:].decode("utf-8", "replace").strip("\r\n")
+                    logger.info("[err] %s", message)
                 if channel == 1:
                     message = PacketLine.from_buffer(packet.data[1:]).data.decode("utf-8", "replace").strip()
-                    logger.info("[%d] %s", channel, message)
+                    logger.debug("[out] %s", channel, message)
+                    error = self._handle_report_message(message)
+                    if error:
+                        push_errors.append(error)
+
             logger.info("Report-status completed")
+
+            if push_errors:
+                for error in push_errors:
+                    logger.error(error)
+                raise ServerError("Push failed with errors. See logs for details")
 
         logger.info("Push completed")
