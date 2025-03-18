@@ -18,6 +18,14 @@ class ConnectionException(Exception):
     pass
 
 
+class ServerError(Exception):
+    """
+    The server returned an error response.
+    """
+
+    pass
+
+
 class Transport(metaclass=ABCMeta):
     def __init__(self, *, url: str, credentials_provider: CredentialProvider):
         self._url = url
@@ -162,7 +170,7 @@ class BaseConnection[T: Transport]:
         header = await anext(section)
         if header.type != PacketLineType.DATA:
             raise ValueError(f"Unexpected packet type: {header.type}: {header.data}")
-        return header.data.decode("ascii").rstrip()
+        return header.data_decoded
 
     async def _read_v1_server_hello(self) -> tuple[dict[str, str], frozenset[str]]:
         """
@@ -193,7 +201,7 @@ class BaseConnection[T: Transport]:
 
         async for packet in section:
             assert packet.type == PacketLineType.DATA
-            ref = Ref.from_line(packet.data.decode("ascii").rstrip())
+            ref = Ref.from_line(packet.data_decoded)
             refs[ref.name] = ref.object_id
 
         return refs, frozenset(capabilities_list.split(" "))
@@ -258,7 +266,7 @@ class FetchConnection[T: Transport](BaseConnection[T]):
         advertised_capabilities: set[str] = set()
         async for packet in self._read_packets_until_flush():
             assert packet.type == PacketLineType.DATA
-            advertised_capabilities.add(packet.data.decode("ascii").rstrip())
+            advertised_capabilities.add(packet.data_decoded)
 
         self.capabilities = frozenset(advertised_capabilities)
 
@@ -292,7 +300,7 @@ class FetchConnection[T: Transport](BaseConnection[T]):
             if ack.data == b"nak\n":
                 break
             if ack.data.startswith(b"ack\0"):
-                obj_id = ack.data[4:].decode("ascii").strip()
+                obj_id = ack.data_decoded[4:]
                 try:
                     missing_objects.remove(obj_id)
                 except KeyError:
@@ -378,7 +386,7 @@ class FetchConnection[T: Transport](BaseConnection[T]):
         # Read the response
         async for packet in self._read_packets_until_flush():
             assert packet.type == PacketLineType.DATA
-            ref = Ref.from_line(packet.data.decode("ascii").rstrip())
+            ref = Ref.from_line(packet.data_decoded)
             if prefix and not ref.name.startswith(prefix):
                 continue
             yield ref
@@ -529,10 +537,10 @@ class FetchConnection[T: Transport](BaseConnection[T]):
             if stream_code == 1:
                 await output.write(memoryview(packet.data)[1:])
             elif stream_code == 2:
-                msg = packet.data[1:].decode("utf-8")
+                msg = packet.data_decoded[1:]
                 logger.info(msg)
             elif stream_code == 3:
-                msg = packet.data[1:].decode("utf-8")
+                msg = packet.data_decoded[1:]
                 logger.error(msg)
 
         assert self.last_packet, "Expected last packet to be set"
@@ -662,6 +670,19 @@ class PushConnection[T: Transport](BaseConnection[T]):
         if packfile is not None:
             await self._send_packfile(packfile)
 
+    def _handle_report_message(self, message: str) -> None | str:
+        if message.startswith("unpack ok"):
+            logger.info("Unpack OK")
+            return
+
+        if message.startswith("ok "):
+            # Ref update was successful
+            return
+
+        if message.startswith("ng "):
+            # Ref update failed
+            return message[3:]
+
     async def push_changes(self, changes: list[RefChange], packfile: AsyncBufferedIOBase | None) -> None:
         """
         (Git Protocol V1) Send changes to the remote server.
@@ -669,21 +690,31 @@ class PushConnection[T: Transport](BaseConnection[T]):
         @see: https://git-scm.com/docs/gitprotocol-pack#_pushing_data_to_a_server
         """
         used_capabilities, packets, packfile_to_send = await self._push_request_v1(changes, packfile)
-
         await self._send_commands(packets, packfile_to_send)
 
-        # Try to read the report-status
         if "report-status" in used_capabilities:
             logger.info("Reading report-status")
+            # Try to read the report-status
+            push_errors: list[str] = []
+
             async for packet in self._read_packets_until_flush():
                 assert packet.type == PacketLineType.DATA
                 channel = int(packet.data[0])
-
                 if channel == 2:
-                    logger.info("[%d] %r", channel, packet.data.decode("utf-8", "replace"))
+                    message = packet.data_decoded[1:]
+                    logger.info("[err] %s", message)
                 if channel == 1:
-                    message = PacketLine.from_buffer(packet.data[1:]).data.decode("utf-8", "replace").strip()
-                    logger.info("[%d] %s", channel, message)
+                    message = PacketLine.from_buffer(packet.data[1:]).data_decoded
+                    logger.debug("[out] %s", message)
+                    error = self._handle_report_message(message)
+                    if error:
+                        push_errors.append(error)
+
             logger.info("Report-status completed")
+
+            if push_errors:
+                for error in push_errors:
+                    logger.error(error)
+                raise ServerError("Push failed with errors. See logs for details")
 
         logger.info("Push completed")

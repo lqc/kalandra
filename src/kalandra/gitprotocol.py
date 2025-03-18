@@ -66,7 +66,7 @@ class PacketLine:
 
     @classmethod
     def data_from_string(cls, data: str) -> "PacketLine":
-        encoded = f"{data}\n".encode("ascii")
+        encoded = f"{data}\n".encode("utf-8")
         return cls(len(encoded), encoded, PacketLineType.DATA)
 
     @classmethod
@@ -107,6 +107,10 @@ class PacketLine:
     def marker_bytes(self) -> bytes:
         return b"%04x" % (self.length + 4 if self.type == PacketLineType.DATA else self.type.value)
 
+    @property
+    def data_decoded(self) -> str:
+        return self.data.decode("utf-8").rstrip()
+
     def __repr__(self) -> str:
         if self.length < 100:
             return f"PacketLine({self.length}, {self.data!r}, {self.type})"
@@ -140,11 +144,11 @@ class RefChange(NamedTuple):
 
     def __str__(self) -> str:
         if self.is_create:
-            return f"CREATE {self.ref} {self.new}"
+            return f"CREATE {repr(self.ref)} {self.new}"
         elif self.is_delete:
-            return f"DELETE {self.ref} {self.old}"
+            return f"DELETE {repr(self.ref)} {self.old}"
         else:
-            return f"UPDATE {self.ref} {self.old}..{self.new}"
+            return f"UPDATE {repr(self.ref)} {self.old}..{self.new}"
 
     @property
     def is_delete(self) -> bool:

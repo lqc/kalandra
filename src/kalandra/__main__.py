@@ -7,7 +7,7 @@ from kalandra.cli import main
 
 def run():
     logging.basicConfig(
-        level=logging.DEBUG,
+        level=logging.INFO,
         format="[%(asctime)s] %(levelname)-8s | %(filename)s:%(lineno)s | %(message)s",
         datefmt="%H:%M:%S",
     )

@@ -71,6 +71,13 @@ def create_parser():
         default=[],
     )
 
+    parser.add_argument(
+        "--log-level",
+        help="Set the logging level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        default="INFO",
+    )
+
     return parser
 
 
@@ -81,7 +88,9 @@ async def main(cmdline_args: list[str]) -> int:
     except argparse.ArgumentError as e:
         logger.error("Error parsing arguments: %s", e)
         parser.print_help()
-        return 2
+        return 1
+
+    logging.root.setLevel(args.log_level)
 
     include_filter = create_glob_filter(*args.include_ref)
     exclude_filter = create_glob_filter(*args.exclude_ref)
@@ -147,7 +156,8 @@ async def main(cmdline_args: list[str]) -> int:
             include_filter=include_filter,
             exclude_filter=exclude_filter,
         )
+        logger.info("Update successful.", extra={"source": source_url, "target": args.target})
         return 0
     except Exception as e:
-        logger.error("Unexpected error while mirroring", exc_info=e)
+        logger.info("Update failed.", extra={"source": source_url, "target": args.target}, exc_info=e)
         return 1

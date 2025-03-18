@@ -87,9 +87,18 @@ async def update_mirror(
             logger.info("No changes detected")
             return changes
 
-        logger.info("Following changes detected:")
-        for change in changes:
-            logger.info(change)
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug("Following changes detected:")
+            for change in changes:
+                logger.debug(change)
+
+        if logger.isEnabledFor(logging.INFO):
+            logger.info(
+                "Following changes detected: %s creates, %d updates, %d deletes",
+                sum(c.is_create for c in changes),
+                sum(c.is_update for c in changes),
+                sum(c.is_delete for c in changes),
+            )
 
         if dry_run:
             return changes
