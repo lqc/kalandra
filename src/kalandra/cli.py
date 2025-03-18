@@ -71,6 +71,13 @@ def create_parser():
         default=[],
     )
 
+    parser.add_argument(
+        "--log-level",
+        help="Set the logging level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        default="INFO",
+    )
+
     return parser
 
 
@@ -81,7 +88,9 @@ async def main(cmdline_args: list[str]) -> int:
     except argparse.ArgumentError as e:
         logger.error("Error parsing arguments: %s", e)
         parser.print_help()
-        return 2
+        return 1
+
+    logging.root.setLevel(args.log_level)
 
     include_filter = create_glob_filter(*args.include_ref)
     exclude_filter = create_glob_filter(*args.exclude_ref)
