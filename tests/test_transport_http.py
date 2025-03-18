@@ -129,6 +129,9 @@ GIT_V1_UPLOAD_HELLO = b"""001e# service=git-upload-pack
 003d9c03ab58a24d78d7a76347e049bc107dd629620f refs/heads/main
 0000"""
 
+GIT_V1_UPLOAD_HELLO_EMPTY_REPO = b"""001e# service=git-upload-pack
+00000000"""
+
 
 @pytest.mark.asyncio
 @pytest.mark.http_interactions(
@@ -197,3 +200,15 @@ async def test_http_fetch_hello_v1(mocked_http_transport: HTTPTransport):
             "object-format=sha1",
             "agent=git/2.46.0",
         }
+
+
+@pytest.mark.asyncio
+@pytest.mark.http_interactions(
+    MockResponse.create(
+        200, {"Content-Type": "application/x-git-upload-pack-advertisement"}, GIT_V1_UPLOAD_HELLO_EMPTY_REPO
+    ),
+)
+async def test_http_fetch_hello_v1_on_empty(mocked_http_transport: HTTPTransport):
+    async with mocked_http_transport.fetch() as connection:
+        assert connection.capabilities == frozenset()
+        assert [x async for x in connection.ls_refs()] == []

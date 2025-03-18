@@ -147,6 +147,7 @@ class BaseConnection[T: Transport]:
 
         The caller can check which packet was received by looking at the last_packet attribute after the iteration is done.
         """
+        self.last_packet = None
         while True:
             try:
                 packet = await self._read_packet()
@@ -167,7 +168,11 @@ class BaseConnection[T: Transport]:
         await self.writer.drain()
 
     async def _read_header_packet(self, section: AsyncIterator[PacketLine]) -> str:
-        header = await anext(section)
+        header = await anext(section, None)
+        if header is None:
+            assert self.last_packet is not None, "Expected last packet to be set"
+            # The section was empty, return empty string as the header
+            return ""
         if header.type != PacketLineType.DATA:
             raise ValueError(f"Unexpected packet type: {header.type}: {header.data}")
         return header.data_decoded
@@ -185,6 +190,12 @@ class BaseConnection[T: Transport]:
         # Read the capabilities from the server (https://git-scm.com/docs/protocol-v2#_capability_advertisement)
         section = self._read_packets_section()
         version_data = await self._read_header_packet(section)
+
+        if version_data == "":
+            if not self.last_packet or self.last_packet.type != PacketLineType.FLUSH:
+                raise ValueError("Expected flush packet after empty header")
+            logger.debug("No refs received, the repository is empty")
+            return refs, frozenset()
 
         # In V1, the version packet is optional
         if version_data.startswith("version "):
