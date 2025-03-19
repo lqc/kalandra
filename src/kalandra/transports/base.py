@@ -424,6 +424,20 @@ class FetchConnection[T: Transport](BaseConnection[T]):
         raise ConnectionException("Unsupported protocol version: %s" % self.negotiated_protocol)
 
     async def _generate_fetch_v1_request(self, want: set[str], have: set[str] | None) -> AsyncIterator[PacketLine]:
+        """
+
+        ```
+        005dwant 7e851ed9ae595e2318464727c062062783c231f6 multi_ack_detailed side-band-64k thin-pack
+        00000032have 5a6d54728a8f0f8184cf1749dd16a3ca7df78c2a
+        0032have 2d9b7bde6e6058cf7ae781ddcc80e2df6a9d78c2
+        0032have fd8ef3e8789e408ebcb38f62be1f37c742013bac
+        0032have fc5a665bfdb2d80f0dbb03d9a51cb86aad679061
+        0032have 2f77028723f425e0c5692828a099527a413187bf
+        0032have 15dcdca4f7700d3ab8302986d665626349b548f6
+        0032have 68c556244e4f2ff941e472a6589246127a9f94dd
+        0009done
+        ```
+        """
         capabilities: set[str] = set()
         capabilities.add("agent=kalandra")
 
@@ -441,8 +455,11 @@ class FetchConnection[T: Transport](BaseConnection[T]):
         yield PacketLine.data_from_string(f"want {obj} {' '.join(sorted(capabilities))}")
 
         # Send the rest of the wants
+        yield PacketLine.data_from_string(f"want {obj}")  # repeat the first want with capabilities
         for obj in want_iter:
             yield PacketLine.data_from_string("want %s" % obj)
+
+        yield PacketLine.FLUSH
 
         # Send the oids of objects we have
         if have:
@@ -452,8 +469,6 @@ class FetchConnection[T: Transport](BaseConnection[T]):
                     continue
                 yield PacketLine.data_from_string("have %s" % obj)
 
-        # Send done
-        yield PacketLine.FLUSH
         yield PacketLine.data_from_string("done")
 
     async def _fetch_objects_v1(
@@ -472,22 +487,41 @@ class FetchConnection[T: Transport](BaseConnection[T]):
         -   https://git-scm.com/docs/pack-protocol#_packfile_negotiation
         """
         await self._send_packet_transaction(self._generate_fetch_v1_request(objects, have))
-
         assert self.reader is not None
 
-        pkt = await self._read_packet()
-        while pkt.data.startswith(b"ACK "):
-            # we will zero or more ACKs - we don't care about them
+        expect_pack = False
+
+        # https://git-scm.com/docs/pack-protocol#_packfile_negotiation
+        #
+        # Once the done line is read from the client, the server will either send a final ACK obj-id
+        # or it will send a NAK. obj-id is the object name of the last commit determined to be common.
+        # The server only sends ACK after done if there is at least one common base and multi_ack or multi_ack_detailed is enabled.
+        # The server always sends NAK after done if there is no common base found.
+        while not expect_pack:
             pkt = await self._read_packet()
+            logger.debug("Incoming packet: %s", pkt)
 
-        if pkt.data.rstrip() != b"NAK":
-            raise ConnectionError("Expected NAK packet, instead got: %r" % pkt.data)
+            if pkt.data.startswith(b"ACK "):
+                parts = pkt.data.split(b" ", 3)
+                # the last ACK
+                if len(parts) == 2:
+                    logger.debug("Last ACK received")
+                    expect_pack = True
+            elif pkt.data.startswith(b"NAK"):
+                logger.debug("NAK received, proceeding with packfile")
+                expect_pack = True
+            else:
+                # anything else is an error message
+                raise ConnectionException(f"Unexpected packet: {pkt}")
 
-        # The rest of the response is the packfile
-        async for chunk in self.reader:
-            await output.write(chunk)
+        if expect_pack:
+            # The rest of the response is the packfile
+            async for chunk in self.reader:
+                await output.write(chunk)
 
-        await output.flush()
+            await output.flush()
+        else:
+            raise ConnectionException("No packfile received from server")
 
     async def _fetch_objects_v2(
         self,
