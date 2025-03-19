@@ -1,8 +1,9 @@
 import asyncio
 import logging
 import os
+import random
 import time
-from typing import AsyncIterator, Literal
+from typing import AsyncIterator, Awaitable, Callable, Literal
 from urllib.parse import urlparse, urlunsplit
 
 import aiohttp
@@ -30,6 +31,18 @@ def http_timeout():
     return aiohttp.ClientTimeout(total=total_timeout, connect=60, sock_connect=60)
 
 
+def http_backoff_base() -> float:
+    return float(os.environ.get("KALANDRA_HTTP_BACKOFF_BASE", "") or 5)  # default 5 seconds
+
+
+def http_backoff_cap() -> float:
+    return float(os.environ.get("KALANDRA_HTTP_BACKOFF_CAP", "") or 60)  # default 5 seconds
+
+
+def http_backoff_attempts() -> float:
+    return float(os.environ.get("KALANDRA_HTTP_BACKOFF_ATTEMPTS", "") or 10)
+
+
 class HTTPSmartConnection(BaseConnection["HTTPTransport"]):
     _session: aiohttp.ClientSession | None = None
     _service: str | None = None
@@ -44,7 +57,7 @@ class HTTPSmartConnection(BaseConnection["HTTPTransport"]):
 
         self._session = self.transport.session_factory(
             headers={
-                "User-Agent": "git/2.46.0",
+                "User-Agent": "kalandra",
             },
             auth=aiohttp.BasicAuth(*credentials) if credentials else None,
         )
@@ -53,12 +66,14 @@ class HTTPSmartConnection(BaseConnection["HTTPTransport"]):
         service_url = self.transport.url + f"/info/refs?service={service_name}"
 
         logger.debug("Connecting to %s, protocol %s", service_url, self.git_protocol)
-        hello_resp = await self._session.get(
-            service_url,
-            headers={
-                "Accept": f"application/x-{service_name}-advertisement",
-                "Git-Protocol": f"version={self.git_protocol}",
-            },
+        hello_resp = await self._with_rate_limit(
+            lambda s: s.get(
+                service_url,
+                headers={
+                    "Accept": f"application/x-{service_name}-advertisement",
+                    "Git-Protocol": f"version={self.git_protocol}",
+                },
+            )
         )
 
         if hello_resp.status != 200:
@@ -105,6 +120,28 @@ class HTTPSmartConnection(BaseConnection["HTTPTransport"]):
     async def _close_service_connection(self) -> None:
         if self._session:
             await self._session.close()
+
+    async def _with_rate_limit(
+        self, request: Callable[[aiohttp.ClientSession], Awaitable[aiohttp.ClientResponse]]
+    ) -> aiohttp.ClientResponse:
+        assert self._session is not None
+        attempt: int = 0
+        sleep_base = http_backoff_base()
+        sleep_cap = http_backoff_cap()
+        max_attempts = http_backoff_attempts()
+        while attempt < max_attempts:
+            response = await request(self._session)
+            if response.status != 429:
+                # We only want to retry on "Too Many Requests"
+                return response
+            sleep_time = random.uniform(0, min(sleep_cap, sleep_base * 2**attempt))
+            logger.warning(
+                "Request was rate limited. Attempt %d/%d, sleeping %.1f seconds.", attempt + 1, max_attempts, sleep_time
+            )
+            await asyncio.sleep(sleep_time)
+            attempt += 1
+
+        raise ConnectionException(f"Rate limited after {max_attempts} attempts. Giving up.")
 
 
 class HTTPSmartFetchConnection(HTTPSmartConnection, FetchConnection["HTTPTransport"]):
@@ -192,16 +229,18 @@ class HTTPSmartPushConnection(HTTPSmartConnection, PushConnection["HTTPTransport
         # Send a new HTTP POST request with the command
         url = self.transport.url + f"/{self._service}"
         logger.debug("Sending PUSH command to %s", url)
-        response = await self._session.post(
-            url,
-            headers={
-                "Content-Type": f"application/x-{self._service}-request",
-                "Cache-Control": "no-cache",
-                "Accept": f"application/x-{self._service}-result, */*",
-                "Git-Protocol": f"version={self.negotiated_protocol}",
-            },
-            timeout=http_timeout(),
-            data=generate_command_data(),
+        response = await self._with_rate_limit(
+            lambda s: s.post(
+                url,
+                headers={
+                    "Content-Type": f"application/x-{self._service}-request",
+                    "Cache-Control": "no-cache",
+                    "Accept": f"application/x-{self._service}-result, */*",
+                    "Git-Protocol": f"version={self.negotiated_protocol}",
+                },
+                timeout=http_timeout(),
+                data=generate_command_data(),
+            )
         )
         if response.status != 200:
             logger.error("Error response: %s", await response.text())
