@@ -212,3 +212,19 @@ async def test_http_fetch_hello_v1_on_empty(mocked_http_transport: HTTPTransport
     async with mocked_http_transport.fetch() as connection:
         assert connection.capabilities == frozenset()
         assert [x async for x in connection.ls_refs()] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.http_interactions(
+    MockResponse.create(429, {"Content-Type": "application/x-git-upload-pack-advertisement"}, b"Too Many Requests"),
+    MockResponse.create(200, {"Content-Type": "application/x-git-upload-pack-advertisement"}, GITHUB_UPLOAD_HELLO),
+)
+async def test_http_fetch_rate_limiting(
+    mocked_http_transport: HTTPTransport, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("KALANDRA_HTTP_BACKOFF_BASE", "0.5")
+    monkeypatch.setenv("KALANDRA_HTTP_BACKOFF_ATTEMPTS", "7")
+    async with mocked_http_transport.fetch():
+        pass
+
+    assert "Request was rate limited. Attempt 1/7, sleeping" in caplog.text
