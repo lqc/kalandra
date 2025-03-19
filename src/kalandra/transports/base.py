@@ -213,6 +213,9 @@ class BaseConnection[T: Transport]:
         async for packet in section:
             assert packet.type == PacketLineType.DATA
             ref = Ref.from_line(packet.data_decoded)
+            if ref.name.endswith("^{}"):
+                # Skip the peeled refs
+                continue
             refs[ref.name] = ref.object_id
 
         return refs, frozenset(capabilities_list.split(" "))
