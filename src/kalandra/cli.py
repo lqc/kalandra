@@ -148,6 +148,7 @@ async def main(cmdline_args: list[str]) -> int:
     source = Transport.from_url(source_url, credentials_provider=credentials_provider)
     target = Transport.from_url(args.target, credentials_provider=credentials_provider)
 
+    logger.info("Update start [%s -> %s]", source.url, target.url)
     try:
         await update_mirror(
             source,
@@ -156,8 +157,8 @@ async def main(cmdline_args: list[str]) -> int:
             include_filter=include_filter,
             exclude_filter=exclude_filter,
         )
-        logger.info("Update successful.", extra={"source": source_url, "target": args.target})
+        logger.info("Update success [%s -> %s]", source.url, target.url)
         return 0
     except Exception as e:
-        logger.info("Update failed.", extra={"source": source_url, "target": args.target}, exc_info=e)
+        logger.error("Update failed [%s -> %s]", source.url, target.url, exc_info=e)
         return 1
