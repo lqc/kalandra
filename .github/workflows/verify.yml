@@ -41,7 +41,7 @@ jobs:
         uses: abatilo/actions-poetry@v4
 
       - name: Cache dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ env.POETRY_CACHE_DIR }}
           key: ${{ runner.os }}-poetry-${{ hashFiles('poetry.lock') }}
