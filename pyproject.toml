@@ -13,7 +13,7 @@ kalandra = 'kalandra.__main__:run'
 [tool.poetry.dependencies]
 python = "^3.12"
 asyncssh = "^2.17.0"
-aiofiles = "^24.1.0"
+aiofiles = "^25.1.0"
 aiohttp = "^3.13.2"
 
 pygithub = { version = "^2.8.1", optional = true }
