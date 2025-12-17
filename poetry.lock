@@ -184,14 +184,14 @@ typing-extensions = {version = ">=4.2", markers = "python_version < \"3.13\""}
 
 [[package]]
 name = "asyncssh"
-version = "2.20.0"
+version = "2.21.1"
 description = "AsyncSSH: Asynchronous SSHv2 client and server library"
 optional = false
 python-versions = ">=3.6"
 groups = ["main"]
 files = [
-    {file = "asyncssh-2.20.0-py3-none-any.whl", hash = "sha256:af6888d937c07a4bf31293335a6166b4d87608cdb5957b49547da6ad87ecf174"},
-    {file = "asyncssh-2.20.0.tar.gz", hash = "sha256:020b6e384b2328ef8683908ad8e73de9ec2b9b62fd964571ea957bba98412983"},
+    {file = "asyncssh-2.21.1-py3-none-any.whl", hash = "sha256:f218f9f303c78df6627d0646835e04039a156d15e174ad63c058d62de61e1968"},
+    {file = "asyncssh-2.21.1.tar.gz", hash = "sha256:9943802955e2131536c2b1e71aacc68f56973a399937ed0b725086d7461c990c"},
 ]
 
 [package.dependencies]
@@ -200,7 +200,7 @@ typing_extensions = ">=4.0.0"
 
 [package.extras]
 bcrypt = ["bcrypt (>=3.1.3)"]
-fido2 = ["fido2 (>=0.9.2)"]
+fido2 = ["fido2 (>=0.9.2,<2)"]
 gssapi = ["gssapi (>=1.2.0)"]
 libnacl = ["libnacl (>=1.4.2)"]
 pkcs11 = ["python-pkcs11 (>=0.7.0)"]
@@ -1281,4 +1281,4 @@ github = ["pygithub"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "b4a116ad7d90c591b80016b2034634e239dbe549aa3317b299beca9d2b0a1c66"
+content-hash = "2e4780c8c56273e023bcb219e1fc893b1662023eefab69d84e2a21bf2865e0ff"
