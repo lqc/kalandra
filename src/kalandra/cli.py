@@ -58,6 +58,12 @@ def create_parser():
     )
 
     parser.add_argument(
+        "--github-auth-config",
+        help="Path to a TOML file containing GitHub authentication configuration. Use this to specify multiple GitHub Apps for different organizations.",
+        type=pathlib.Path,
+    )
+
+    parser.add_argument(
         "--include-ref",
         help="Include only refs that match the given glob patter. Default: refs/heads/*, refs/tags/*",
         action="append",
@@ -96,22 +102,27 @@ async def main(cmdline_args: list[str]) -> int:
     exclude_filter = create_glob_filter(*args.exclude_ref)
 
     # Credentials provider
-    credentials_provider = ChainedCredentialProvider()
+    source_credential_chain = ChainedCredentialProvider()
+    target_credential_chain = ChainedCredentialProvider()
     if args.netrc is not None:
         netrc_file = args.netrc if isinstance(args.netrc, pathlib.Path) else None
-        credentials_provider.add_provider(NetrcCredentialProvider(netrc_file))
+        source_credential_chain.add_provider(NetrcCredentialProvider(netrc_file))
+        target_credential_chain.add_provider(NetrcCredentialProvider(netrc_file))
 
-    if args.github_app_id or args.github_app_key:
-        assert args.github_app_id and args.github_app_key, "GitHub App requires both ID and private key"
+    # Check if GitHub support is needed
+    if args.github_auth_config or args.github_app_id or args.github_app_key:
         try:
-            from kalandra.github_utils import GithubAPI
+            from kalandra.github_config_utils import GithubAPI, setup_github_auth
         except ImportError:
             logger.error("GitHub integration not available, install kalandra[github] to enable it.")
             return 1
 
-        github_api = GithubAPI(args.github_app_id, args.github_app_key)
-
-        credentials_provider.add_provider(github_api.crendentials_provider_for_org(args.github_org))
+        github_api: GithubAPI | None = setup_github_auth(
+            config_path=args.github_auth_config,
+            app_id=args.github_app_id,
+            app_key=args.github_app_key,
+            org=args.github_org,
+        )
     else:
         github_api = None
 
@@ -124,7 +135,7 @@ async def main(cmdline_args: list[str]) -> int:
 
         logger.info("Looking up source URL from target repository")
 
-        props = await github_api.get_repo_properties(args.target)
+        props = github_api.get_repo_properties(args.target)
         source_prop_name = args.source[len("target-prop:") :]
 
         if source_prop_name not in props:
@@ -145,8 +156,18 @@ async def main(cmdline_args: list[str]) -> int:
         else:
             source_url = source_prop_value
 
-    source = Transport.from_url(source_url, credentials_provider=credentials_provider)
-    target = Transport.from_url(args.target, credentials_provider=credentials_provider)
+    if github_api is not None:
+        github_api.add_github_credential_provider_if_applicable(
+            source_url,
+            source_credential_chain,
+        )
+        github_api.add_github_credential_provider_if_applicable(
+            args.target,
+            target_credential_chain,
+        )
+
+    source = Transport.from_url(source_url, credentials_provider=source_credential_chain)
+    target = Transport.from_url(args.target, credentials_provider=target_credential_chain)
 
     logger.info("Update start [%s -> %s]", source.url, target.url)
     try:
