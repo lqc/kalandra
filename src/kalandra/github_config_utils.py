@@ -12,17 +12,14 @@ logger = logging.getLogger(__name__)
 
 
 class GitHubAppCredentialProvider(CredentialProvider):
-    _installation_id: int | None = None
+    _installation_id: int
 
-    def __init__(self, integration: github.GithubIntegration, installation_id: int | None) -> None:
+    def __init__(self, integration: github.GithubIntegration, installation_id: int) -> None:
         self._integration = integration
         self._installation_id = installation_id
 
     async def get_credentials(self, origin: str) -> tuple[str, str] | None:
         if origin != "github.com":
-            return None
-
-        if self._installation_id is None:
             return None
 
         return ("x-access-token", self._integration.get_access_token(self._installation_id).token)
@@ -93,7 +90,7 @@ class GithubAPI:
 
         return org, repo_name
 
-    async def get_repo_properties(
+    def get_repo_properties(
         self,
         repo_url: str,
     ) -> dict[str, str]:
@@ -114,6 +111,14 @@ class GithubAPI:
     def credentials_provider_for_org(self, org: str) -> GitHubAppCredentialProvider | None:
         if org not in self._org_providers:
             installation_id = self.get_installation_id(org)
+            if installation_id is None:
+                logger.error(
+                    "App %s has no installation ID for org %s, cannot create credential provider",
+                    self._integration_by_org[org].auth.app_id,
+                    org,
+                )
+                return None
+
             provider = GitHubAppCredentialProvider(self._integration_by_org[org], installation_id)
             self._org_providers[org] = provider
 
@@ -123,6 +128,7 @@ class GithubAPI:
         self, repo_url: str, credential_chain: ChainedCredentialProvider
     ) -> None:
         org, _ = self._split_repo_url(repo_url)
+        # logger.info("ORG: %s, Repo URL: %s", org, repo_url)
         if org is None:
             return
 

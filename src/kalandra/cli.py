@@ -135,7 +135,7 @@ async def main(cmdline_args: list[str]) -> int:
 
         logger.info("Looking up source URL from target repository")
 
-        props = await github_api.get_repo_properties(args.target)
+        props = github_api.get_repo_properties(args.target)
         source_prop_name = args.source[len("target-prop:") :]
 
         if source_prop_name not in props:
