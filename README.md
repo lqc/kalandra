@@ -34,18 +34,8 @@ only transfer the pack.
 
 ## Roadmap
 
-Completed features:
+Planned features:
 
-- [X] support for ``file://`` targets.
-- [X] basic support for ``ssh://`` targets using [AsyncSSH](https://github.com/ronf/asyncssh).
-- [X] support for ``http://`` targets.
-- [X] GitHub App token authentication for HTTP
-
-Planned features (in order of priority):
-
-- [ ] add "sync-to-github" command which updates a mirror on GitHub based on metadata configured
-  in [GH custom properties](https://docs.github.com/en/organizations/managing-organization-settings/managing-custom-properties-for-repositories-in-your-organization#about-custom-properties)
-- [ ] package as OCI image.
 - [ ] optimize use of capabilities like ``ofs-delta``.
 
 ## Contributing
