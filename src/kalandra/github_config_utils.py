@@ -136,7 +136,7 @@ def parse_github_auth_config(config_path: pathlib.Path) -> list[AppConfig]:
         config_data = tomllib.load(config_file)
     app_configs: list[AppConfig] = []
 
-    for app_entry in config_data.get("github_apps", []):
+    for _key, app_entry in config_data.get("github_apps", {}).items():
         app_id = app_entry.get("app_id")
         app_key_path_str = app_entry.get("app_key_path")
         orgs = tuple(app_entry.get("orgs", []))
