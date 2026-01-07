@@ -9,8 +9,12 @@ LABEL org.opencontainers.image.licenses="Apache 2.0"
 
 WORKDIR /opt/app
 RUN \
-    --mount=type=cache,target=/opt/cache/pip \
+    --mount=type=cache,target=/root/.cache/pip \
+    pip install uv
+
+RUN \
+    --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,target=/opt/app \
-    pip install --cache-dir /opt/cache/pip '.[github]'
+    uv pip install --system --cache-dir /root/.cache/uv '.[github]'
 
 ENTRYPOINT ["kalandra"]
