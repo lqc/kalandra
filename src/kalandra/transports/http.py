@@ -54,6 +54,7 @@ class HTTPSmartConnection(BaseConnection["HTTPTransport"]):
         assert origin is not None, "No hostname in service URL"
         logger.debug("Getting credentials for %s", origin)
         credentials = await self.transport.get_credentials(origin)
+        logger.debug("Credentials obtained: %s", "yes" if credentials else "no")
 
         self._session = self.transport.session_factory(
             headers={
@@ -77,7 +78,7 @@ class HTTPSmartConnection(BaseConnection["HTTPTransport"]):
         )
 
         if hello_resp.status != 200:
-            raise ConnectionException(f"Failed to connect to server {hello_resp.reason} ({hello_resp.status})")
+            raise ConnectionException(f"Failed to connect to {service_url}: {hello_resp.reason} ({hello_resp.status})")
 
         content_type = hello_resp.headers.get("Content-Type")
         if content_type != f"application/x-{service_name}-advertisement":
