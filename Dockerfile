@@ -37,7 +37,7 @@ RUN groupadd --system --gid 999 nonroot \
  && useradd --system --gid 999 --uid 999 --create-home nonroot
 
 # Copy the application from the builder
-COPY --from=builder --chown=nonroot:nonroot /opt/app /opt/app
+COPY --from=builder --chown=root:root --chmod=755 /opt/app /opt/app
 
 # Place executables in the environment at the front of the path
 ENV PATH="/opt/app/.venv/bin:$PATH"
