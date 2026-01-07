@@ -4,7 +4,7 @@ from unittest.mock import Mock
 import pytest
 from github import GithubIntegration
 
-from kalandra.github_utils import GitHubAppCredentialProvider
+from kalandra.github_config_utils import GitHubAppCredentialProvider
 
 
 @pytest.mark.asyncio
