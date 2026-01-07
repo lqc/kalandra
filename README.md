@@ -38,6 +38,20 @@ Planned features:
 
 - [ ] optimize use of capabilities like ``ofs-delta``.
 
+## Development
+
+Install the project with all extras and dev tools using uv:
+
+```shell
+uv sync --all-extras --all-groups
+```
+
+Run the test suite:
+
+```shell
+uv run pytest -vv
+```
+
 ## Contributing
 
 TBD

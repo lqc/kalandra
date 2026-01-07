@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any, NamedTuple
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import aiohttp
@@ -18,17 +18,29 @@ class StaticCredentialProvider(CredentialProvider):
         return self.username, self.password
 
 
-class MockResponse(NamedTuple):
+class MockResponse:
     status: int
     headers: dict[str, str]
-    content: asyncio.StreamReader
+    _raw_content: bytes
+    _reader: asyncio.StreamReader | None
 
     @classmethod
-    def create(cls, status: int, headers: dict[str, str], content: bytes):
-        reader = asyncio.StreamReader()
-        reader.feed_data(content)
-        reader.feed_eof()
-        return cls(status, dict(headers), reader)
+    def create(cls, status: int, headers: dict[str, str], raw_content: bytes):
+        return cls(status, headers, raw_content)
+
+    def __init__(self, status: int, headers: dict[str, str], content: bytes):
+        self.status = status
+        self.headers = headers
+        self._raw_content = content
+        self._reader = None
+
+    @property
+    def content(self) -> asyncio.StreamReader:
+        if self._reader is None:
+            self._reader = asyncio.StreamReader()
+            self._reader.feed_data(self._raw_content)
+            self._reader.feed_eof()
+        return self._reader
 
 
 def mock_session(*args: MockResponse) -> type[aiohttp.ClientSession]:

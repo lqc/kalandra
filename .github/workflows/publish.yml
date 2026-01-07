@@ -2,7 +2,7 @@ name: publish
 on:
   push:
     tags:
-      - 'v*.*.*'
+      - "v*.*.*"
   workflow_dispatch:
 
 jobs:
@@ -16,26 +16,29 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version-file: .python-version
-      - name: Install poetry
-        uses: abatilo/actions-poetry@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@61cb8a9741eeb8a550a1b8544337180c0fc8476b # v7.2.0
+
+      - name: Sync dependencies
+        run: uv sync --all-extras
 
       - name: Check if tag matches the version
         if: github.event_name == 'push'
         run: |
-            VERSION_IN_CODE=$(poetry version --short)
-            if [ "v$VERSION_IN_CODE" != "$GITHUB_REF_NAME" ]; then
-                echo "Tag does not match the version in pyproject.toml"
-                exit 1
-            fi
+          VERSION_IN_CODE=$(uv version --short)
+          if [ "v$VERSION_IN_CODE" != "$GITHUB_REF_NAME" ]; then
+              echo "Tag does not match the version in pyproject.toml"
+              exit 1
+          fi
 
       - name: Override version to a snapshot version
         if: github.event_name == 'workflow_dispatch'
         run: |
-            VERSION_IN_CODE=$(poetry version --short)
-            poetry version "$VERSION_IN_CODE.dev${GITHUB_RUN_NUMBER}"
+          VERSION_IN_CODE=$(uv version --short)
+          uv version "$VERSION_IN_CODE.dev${GITHUB_RUN_NUMBER}"
 
       - name: Build distributions
-        run: poetry build
+        run: uv build
 
       - name: Upload release distributions
         uses: actions/upload-artifact@v6
@@ -49,7 +52,7 @@ jobs:
       - name: Build OCI image
         shell: bash
         run: |
-          IMAGE_TAG="$(poetry version --short)"
+          IMAGE_TAG="$(uv version --short)"
           docker buildx build \
             --output=type=registry --tag "ghcr.io/lqc/kalandra:${IMAGE_TAG}" \
             .
@@ -73,5 +76,5 @@ jobs:
       - name: Publish release distributions to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-            print-hash: true
-            attestations: true
+          print-hash: true
+          attestations: true

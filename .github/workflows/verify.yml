@@ -33,27 +33,17 @@ jobs:
         with:
           python-version-file: .python-version
 
-      - name: Set poetry cache to a known location
-        run: |
-          echo "POETRY_CACHE_DIR=$RUNNER_TEMP/poetry-cache" >> "$GITHUB_ENV"
+      - name: Install uv
+        uses: astral-sh/setup-uv@61cb8a9741eeb8a550a1b8544337180c0fc8476b # v7.2.0
 
-      - name: Install poetry
-        uses: abatilo/actions-poetry@v4
-
-      - name: Cache dependencies
-        uses: actions/cache@v5
-        with:
-          path: ${{ env.POETRY_CACHE_DIR }}
-          key: ${{ runner.os }}-poetry-${{ hashFiles('poetry.lock') }}
-
-      - name: Install dependencies
-        run: poetry install --with dev --all-extras
+      - name: Sync dependencies
+        run: uv sync --all-extras --all-groups
 
       - name: Run tests
         env:
           TEST_GITHUB_APP_ID: "${{ secrets.KALANDRA_TEST_APP_ID }}"
           TEST_GITHUB_APP_KEY: "${{ secrets.KALANDRA_TEST_APP_KEY }}"
-        run: poetry run pytest --cov=src -vv --junit-xml=build/e2e-test-results.xml
+        run: uv run pytest --cov=src -vv --junit-xml=build/e2e-test-results.xml
 
       - name: Type checking
         uses: jakebailey/pyright-action@v2
