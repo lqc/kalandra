@@ -76,8 +76,8 @@ def test_docker_image_can_sync_two_local_file_repos():
 
         call_check(["docker", "build", "-t", tag, "."], what="docker build")
 
-        upstream_url = "file:///repos/upstream.git"
-        mirror_url = "file:///repos/mirror.git"
+        upstream_url = "file:///opt/data/upstream.git"
+        mirror_url = "file:///opt/data/mirror.git"
 
         # fix permissions in host_dir to allow non-root user in container to read/write
         for root, dirs, files in host_dir.walk():
@@ -86,7 +86,6 @@ def test_docker_image_can_sync_two_local_file_repos():
             for entry in files:
                 (root / entry).chmod(0o666)
         host_dir.chmod(0o777)
-        shutil.chown(host_dir, user=999, group=999)
 
         call_check(
             [
@@ -95,7 +94,7 @@ def test_docker_image_can_sync_two_local_file_repos():
                 "--rm",
                 "--read-only",
                 "-v",
-                f"{host_dir}:/repos",
+                f"{host_dir}:/opt/data",
                 tag,
                 "--source",
                 upstream_url,
