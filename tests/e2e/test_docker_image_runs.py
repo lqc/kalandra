@@ -80,13 +80,13 @@ def test_docker_image_can_sync_two_local_file_repos():
         mirror_url = "file:///repos/mirror.git"
 
         # fix permissions in host_dir to allow non-root user in container to read/write
-        shutil.chown(host_dir, user=999, group=999)
-        host_dir.chmod(0o777)
         for root, dirs, files in host_dir.walk():
             for entry in dirs:
                 (root / entry).chmod(0o777)
             for entry in files:
                 (root / entry).chmod(0o666)
+        host_dir.chmod(0o777)
+        shutil.chown(host_dir, user=999, group=999)
 
         call_check(
             [
