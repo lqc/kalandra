@@ -79,6 +79,13 @@ def test_docker_image_can_sync_two_local_file_repos():
         upstream_url = "file:///repos/upstream.git"
         mirror_url = "file:///repos/mirror.git"
 
+        # fix permissions in host_dir to allow non-root user in container to read/write
+        for root, dirs, files in os.walk(host_dir):
+            for momo in dirs:
+                os.chmod(os.path.join(root, momo), 0o777)
+            for momo in files:
+                os.chmod(os.path.join(root, momo), 0o666)
+
         call_check(
             [
                 "docker",

@@ -89,7 +89,6 @@ class FileTransport(Transport):
         path = Path(url[7:])
 
         self.path = path.resolve()
-        print(self.path.stat())
         if not self.path.is_dir():
             raise FileNotFoundError(f"Path {self.path} must point to a directory")
 
