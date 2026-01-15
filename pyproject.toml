@@ -32,7 +32,10 @@ addopts = '--import-mode=importlib --cov --cov-report=lcov'
 log_cli = true
 log_cli_level = "INFO"
 log_cli_format = "%(levelname)8s %(message)s"
-markers = ["http_interactions: mark test as requiring HTTP interactions"]
+markers = [
+    "http_interactions: mark test as requiring HTTP interactions",
+    "e2e: end-to-end or integration-style tests",
+]
 testpaths = ['tests']
 
 asyncio_mode = "auto"
