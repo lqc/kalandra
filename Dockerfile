@@ -38,8 +38,7 @@ RUN apt-get update \
 
 # Setup a non-root user
 RUN groupadd --system --gid 999 nonroot \
- && useradd --system --gid 999 --uid 999 --create-home nonroot \
- && git config --global --add "safe.directory" '/opt/data/*'
+ && useradd --system --gid 999 --uid 999 --create-home nonroot
 
 # Copy the application from the builder
 COPY --from=builder --chown=root:root --chmod=755 /opt/app /opt/app
@@ -49,6 +48,7 @@ ENV PATH="/opt/app/.venv/bin:$PATH"
 
 # Use the non-root user to run our application
 USER nonroot
+RUN git config --global --add "safe.directory" '*'
 
 # We need a writable temp directory for Git operations
 VOLUME [ "/tmp" ]
