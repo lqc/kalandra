@@ -5,7 +5,6 @@
 # Use a Python image with uv pre-installed
 FROM ghcr.io/astral-sh/uv:python3.14-trixie-slim AS builder
 
-
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
 
 # Omit development dependencies
@@ -32,6 +31,11 @@ LABEL org.opencontainers.image.source=https://github.com/lqc/kalandra
 LABEL org.opencontainers.image.description="Kalandra is a tool to mirror Git repositories."
 LABEL org.opencontainers.image.licenses="Apache 2.0"
 
+# Required at runtime for `file://` transport (git-upload-pack / git-receive-pack).
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git \
+ && rm -rf /var/lib/apt/lists/*
+
 # Setup a non-root user
 RUN groupadd --system --gid 999 nonroot \
  && useradd --system --gid 999 --uid 999 --create-home nonroot
@@ -44,6 +48,9 @@ ENV PATH="/opt/app/.venv/bin:$PATH"
 
 # Use the non-root user to run our application
 USER nonroot
+
+# We need a writable temp directory for Git operations
+VOLUME [ "/tmp" ]
 
 # Use `/opt/app` as the working directory
 WORKDIR /opt/app

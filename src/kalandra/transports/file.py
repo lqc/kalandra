@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import shutil
 from pathlib import Path
 from typing import Literal
 
@@ -13,13 +14,29 @@ logger = logging.getLogger(__name__)
 class FileConnection(BaseConnection["FileTransport"]):
     process: asyncio.subprocess.Process
 
+    def _service_argv(self, service_name: Literal["git-upload-pack", "git-receive-pack"]) -> list[str]:
+        # Prefer the dedicated plumbing binaries when available, but fall back to
+        # invoking via `git` for portability (some distros keep git-* outside PATH).
+        if shutil.which(service_name):
+            return [service_name, str(self.transport.path)]
+
+        # Map to `git <subcommand>`.
+        if service_name == "git-upload-pack":
+            subcommand = "upload-pack"
+        elif service_name == "git-receive-pack":
+            subcommand = "receive-pack"
+        else:
+            raise ValueError(f"Unsupported service: {service_name}")
+
+        return ["git", subcommand, str(self.transport.path)]
+
     async def _open_service_connection(
         self, service_name: Literal["git-upload-pack", "git-receive-pack"]
     ) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
         logger.debug("Connecting to %s", self.transport.path)
+        argv = self._service_argv(service_name)
         self.process = await asyncio.create_subprocess_exec(
-            service_name,
-            self.transport.path,
+            *argv,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -73,7 +90,7 @@ class FileTransport(Transport):
 
         self.path = path.resolve()
         if not self.path.is_dir():
-            raise FileNotFoundError(f"Path {self.path} must point to a git repository")
+            raise FileNotFoundError(f"Path {self.path} must point to a directory")
 
         objects = self.path / "objects"
         if not objects.is_dir():

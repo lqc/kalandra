@@ -511,7 +511,7 @@ wheels = [
 
 [[package]]
 name = "kalandra"
-version = "0.9.0.dev0"
+version = "0.9.1"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
