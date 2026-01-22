@@ -48,11 +48,9 @@ ENV PATH="/opt/app/.venv/bin:$PATH"
 
 # Use the non-root user to run our application
 USER nonroot
-RUN git config --global --add "safe.directory" '*'
 
 # We need a writable temp directory for Git operations
 VOLUME [ "/tmp" ]
-VOLUME [ "/opt/data"]
 
 # Use `/opt/app` as the working directory
 WORKDIR /opt/app

@@ -2,7 +2,6 @@ import os
 import pathlib
 import shutil
 import subprocess
-import tempfile
 import uuid
 
 import pytest
@@ -47,77 +46,26 @@ def test_docker_image_can_sync_two_local_file_repos():
 
     tag = f"kalandra:test-{uuid.uuid4().hex}"
 
-    # We need a local temp dir as Docker cannot mount into /tmp on some systems (e.g. OS X)
-    base_tmp = pathlib.Path(".tmp")
-    base_tmp.mkdir(parents=True, exist_ok=True)
-    host_dir = pathlib.Path(tempfile.mkdtemp(dir=".tmp/"))
+    call_check(["docker", "build", "-t", tag, "."], what="docker build")
 
-    upstream_bare = host_dir / "upstream.git"
-    mirror_bare = host_dir / "mirror.git"
-    workdir = host_dir / "work"
+    entrypoint_script = pathlib.Path(__file__).parent / "test_image_entrypoint.sh"
 
     try:
-        call_check(["git", "init", "--bare", str(upstream_bare)], what="git init --bare upstream")
-        call_check(["git", "init", "--bare", str(mirror_bare)], what="git init --bare mirror")
-
-        workdir.mkdir(parents=True, exist_ok=True)
-        call_check(["git", "init", "-b", "main"], cwd=workdir, what="git init workdir")
-        call_check(["git", "config", "user.email", "test@example.com"], cwd=workdir, what="git config user.email")
-        call_check(["git", "config", "user.name", "Test"], cwd=workdir, what="git config user.name")
-
-        (workdir / "README.md").write_text("hello\n", encoding="utf-8")
-        call_check(["git", "add", "README.md"], cwd=workdir, what="git add")
-        call_check(["git", "commit", "-m", "initial"], cwd=workdir, what="git commit")
-
-        call_check(["git", "remote", "add", "origin", str(upstream_bare)], cwd=workdir, what="git remote add")
-        call_check(["git", "push", "origin", "main"], cwd=workdir, what="git push upstream")
-        call_check(["git", "tag", "v0"], cwd=workdir, what="git tag")
-        call_check(["git", "push", "origin", "v0"], cwd=workdir, what="git push tag")
-
-        call_check(["docker", "build", "-t", tag, "."], what="docker build")
-
-        upstream_url = "file:///opt/data/upstream.git"
-        mirror_url = "file:///opt/data/mirror.git"
-
-        # fix permissions in host_dir to allow non-root user in container to read/write
-        for root, dirs, files in host_dir.walk():
-            for entry in dirs:
-                (root / entry).chmod(0o777)
-            for entry in files:
-                (root / entry).chmod(0o666)
-        host_dir.chmod(0o777)
-
-        call_check(
+        result = call_check(
             [
                 "docker",
                 "run",
                 "--rm",
                 "--read-only",
                 "-v",
-                f"{host_dir}:/opt/data",
+                f"{entrypoint_script}:/opt/test_image_entrypoint.sh",
+                "--entrypoint",
+                "/opt/test_image_entrypoint.sh",
                 tag,
-                "--source",
-                upstream_url,
-                "--target",
-                mirror_url,
             ],
             what="docker run kalandra",
         )
-
-        upstream_head = call_check(
-            ["git", "--git-dir", str(upstream_bare), "rev-parse", "refs/heads/main"],
-            what="git rev-parse upstream",
-        )
-        mirror_head = call_check(
-            ["git", "--git-dir", str(mirror_bare), "rev-parse", "refs/heads/main"],
-            what="git rev-parse mirror",
-        )
-
-        assert upstream_head.stdout.strip() == mirror_head.stdout.strip()
-
-        # Tag should be mirrored as well.
-        call_check(["git", "--git-dir", str(mirror_bare), "rev-parse", "refs/tags/v0"], what="git rev-parse mirror tag")
+        assert result.stdout == "SUCCESS\n", f"Unexpected stderr from docker run:\n{result.stderr}"
     finally:
         # Best-effort cleanup.
         subprocess.run(["docker", "rmi", "-f", tag], check=False, capture_output=True)
-        shutil.rmtree(host_dir, ignore_errors=True)
