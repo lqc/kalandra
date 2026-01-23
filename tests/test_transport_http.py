@@ -239,4 +239,4 @@ async def test_http_fetch_rate_limiting(
     async with mocked_http_transport.fetch():
         pass
 
-    assert "Request was rate limited. Attempt 1/7, sleeping" in caplog.text
+    assert "Got HTTP code: 429. Attempt 1/7, sleeping" in caplog.text
