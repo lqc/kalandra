@@ -36,7 +36,7 @@ def http_backoff_base() -> float:
 
 
 def http_backoff_cap() -> float:
-    return float(os.environ.get("KALANDRA_HTTP_BACKOFF_CAP", "") or 60)  # default 5 seconds
+    return float(os.environ.get("KALANDRA_HTTP_BACKOFF_CAP", "") or 60)  # default 60 seconds
 
 
 def http_backoff_attempts() -> float:
@@ -52,9 +52,9 @@ class HTTPSmartConnection(BaseConnection["HTTPTransport"]):
     ) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
         origin = urlparse(self.transport.url).hostname
         assert origin is not None, "No hostname in service URL"
-        logger.debug("Getting credentials for %s", origin)
+        logger.debug("[%s] Getting credentials", self.transport.url)
         credentials = await self.transport.get_credentials(origin)
-        logger.debug("Credentials obtained: %s", "yes" if credentials else "no")
+        logger.debug("[%s] Credentials obtained: %s", self.transport.url, "yes" if credentials else "no")
 
         self._session = self.transport.session_factory(
             headers={
@@ -66,7 +66,7 @@ class HTTPSmartConnection(BaseConnection["HTTPTransport"]):
         # As per https://git-scm.com/docs/gitprotocol-http#_url_format
         service_url = self.transport.url + f"/info/refs?service={service_name}"
 
-        logger.debug("Connecting to %s, protocol %s", service_url, self.git_protocol)
+        logger.debug("[%s] Connecting to %s, protocol %s", self.transport.url, service_url, self.git_protocol)
         hello_resp = await self._with_rate_limit(
             lambda s: s.get(
                 service_url,
@@ -74,7 +74,9 @@ class HTTPSmartConnection(BaseConnection["HTTPTransport"]):
                     "Accept": f"application/x-{service_name}-advertisement",
                     "Git-Protocol": f"version={self.git_protocol}",
                 },
-            )
+            ),
+            # Due to clock skew, GitHub may return 404 or 403 for valid requests
+            retry_codes=(429, 401, 403, 404),
         )
 
         if hello_resp.status != 200:
@@ -123,7 +125,9 @@ class HTTPSmartConnection(BaseConnection["HTTPTransport"]):
             await self._session.close()
 
     async def _with_rate_limit(
-        self, request: Callable[[aiohttp.ClientSession], Awaitable[aiohttp.ClientResponse]]
+        self,
+        request: Callable[[aiohttp.ClientSession], Awaitable[aiohttp.ClientResponse]],
+        retry_codes: tuple[int, ...] = (429,),
     ) -> aiohttp.ClientResponse:
         assert self._session is not None
         attempt: int = 0
@@ -132,12 +136,16 @@ class HTTPSmartConnection(BaseConnection["HTTPTransport"]):
         max_attempts = http_backoff_attempts()
         while attempt < max_attempts:
             response = await request(self._session)
-            if response.status != 429:
-                # We only want to retry on "Too Many Requests"
+            if response.status not in retry_codes:
+                # We only want to retry on "Too Many Requests" and similar
                 return response
             sleep_time = random.uniform(0, min(sleep_cap, sleep_base * 2**attempt))
             logger.warning(
-                "Request was rate limited. Attempt %d/%d, sleeping %.1f seconds.", attempt + 1, max_attempts, sleep_time
+                "Got HTTP code: %d. Attempt %d/%d, sleeping %.1f seconds.",
+                response.status,
+                attempt + 1,
+                max_attempts,
+                sleep_time,
             )
             await asyncio.sleep(sleep_time)
             attempt += 1
