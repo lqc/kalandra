@@ -46,7 +46,7 @@ jobs:
         run: uv run pytest --cov=src -vv --junit-xml=build/e2e-test-results.xml
 
       - name: Type checking
-        uses: jakebailey/pyright-action@v2
+        uses: jakebailey/pyright-action@v3
         with:
           pylance-version: latest-release
           python-path: ${{ github.workspace }}/.venv/bin/python3
