@@ -19,7 +19,7 @@ github = ["pygithub>=2.8.1,<3.0.0"]
 kalandra = "kalandra.__main__:run"
 
 [dependency-groups]
-dev = ["pytest>=9.0.2", "pytest-asyncio>=1.3.0", "pytest-cov>=7.0"]
+dev = ["pytest>=9.0.2", "pytest-asyncio>=1.3.0", "pytest-cov>=7.1.0"]
 
 [tool.uv]
 
