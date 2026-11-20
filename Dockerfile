@@ -22,7 +22,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=README.md,target=README.md \
     --mount=type=bind,source=src,target=src \
-    uv venv && uv pip install '.[github]'
+    uv sync --locked --no-editable --extra github
 
 # --- Final stage ---
 FROM python:3.14-slim-trixie
