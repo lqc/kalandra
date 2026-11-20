@@ -9,10 +9,21 @@ from kalandra.auth.basic import CredentialProvider
 from .base import BaseConnection, FetchConnection, PushConnection, Transport
 
 logger = logging.getLogger(__name__)
+STDERR_DRAIN_TIMEOUT = 1.0
+
+
+class FileServiceProtocol(asyncio.subprocess.SubprocessStreamProtocol):
+    def __init__(self, loop: asyncio.AbstractEventLoop) -> None:
+        super().__init__(limit=2**16, loop=loop)
+        self.exited = asyncio.Event()
+
+    def process_exited(self) -> None:
+        super().process_exited()
+        self.exited.set()
 
 
 class FileConnection(BaseConnection["FileTransport"]):
-    process: asyncio.subprocess.Process
+    process: asyncio.SubprocessTransport
 
     def _service_argv(self, service_name: Literal["git-upload-pack", "git-receive-pack"]) -> list[str]:
         # Prefer the dedicated plumbing binaries when available, but fall back to
@@ -34,38 +45,49 @@ class FileConnection(BaseConnection["FileTransport"]):
         self, service_name: Literal["git-upload-pack", "git-receive-pack"]
     ) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
         logger.debug("Connecting to %s", self.transport.path)
-        argv = self._service_argv(service_name)
-        self.process = await asyncio.create_subprocess_exec(
-            *argv,
+        executable, *args = self._service_argv(service_name)
+        loop = asyncio.get_running_loop()
+        self.process, protocol = await loop.subprocess_exec(
+            lambda: FileServiceProtocol(loop),
+            executable,
+            *args,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env={"GIT_PROTOCOL": f"version={self.git_protocol}"},
         )
 
-        if self.process.returncode is not None:
-            logger.error(f"Failed to start process {service_name}: {self.process} / {self.process.returncode}")
+        returncode = self.process.get_returncode()
+        if returncode is not None:
+            self.process.close()
+            logger.error(f"Failed to start process {service_name}: {self.process} / {returncode}")
             raise RuntimeError(f"Failed to start process {service_name}")
 
-        assert self.process.stdout is not None
-        assert self.process.stdin is not None
-        assert self.process.stderr is not None
+        assert protocol.stdout is not None
+        assert protocol.stdin is not None
+        assert protocol.stderr is not None
 
-        # We don't need stderr, so we can just read it in the background
-        self._err_task = asyncio.create_task(self.log_error_messages(self.process.stderr))
+        self._process_exited = protocol.exited
+        self._err_task = asyncio.create_task(self.log_error_messages(protocol.stderr))
 
-        return (self.process.stdout, self.process.stdin)
+        return protocol.stdout, protocol.stdin
 
     async def log_error_messages(self, stream: asyncio.StreamReader) -> None:
         async for line in stream:
             logger.error(f"Error: {line.decode()}")
 
     async def _close_service_connection(self) -> None:
-        if self.process.returncode is None:
-            self.process.terminate()
-        await self.process.wait()
-
-        await self._err_task
+        try:
+            if self.process.get_returncode() is None:
+                self.process.terminate()
+            # Process.wait() can wait for pipe closure. A descendant may still hold stderr open.
+            await self._process_exited.wait()
+            await asyncio.wait_for(self._err_task, timeout=STDERR_DRAIN_TIMEOUT)
+        except TimeoutError:
+            logger.debug("Timed out draining stderr from %s", self.transport.path)
+        finally:
+            self._err_task.cancel()
+            self.process.close()
 
 
 class FileFetchConnection(FileConnection, FetchConnection["FileTransport"]):
