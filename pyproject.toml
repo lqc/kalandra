@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-github = ["pygithub>=2.8.1,<3.0.0"]
+github = ["pygithub>=2.9.1,<3.0.0"]
 
 [project.scripts]
 kalandra = "kalandra.__main__:run"
