@@ -8,18 +8,19 @@ authors = [{ name = "Lukasz Rekucki", email = "lrekucki@gmail.com" }]
 requires-python = ">=3.12"
 dependencies = [
     "aiofiles>=25.1.0,<26.0.0",
-    "aiohttp>=3.13.3,<4.0.0",
+    "aiohttp>=3.13.5,<4.0.0",
     "asyncssh>=2.22.0,<3.0.0",
 ]
 
 [project.optional-dependencies]
-github = ["pygithub>=2.8.1,<3.0.0"]
+github = ["pygithub>=2.9.1,<3.0.0"]
 
 [project.scripts]
 kalandra = "kalandra.__main__:run"
 
 [dependency-groups]
-dev = ["pytest>=9.0.2", "pytest-asyncio>=1.3.0", "pytest-cov>=7.1.0"]
+dev = ["pytest>=9.0.3", "pytest-asyncio>=1.3.0", "pytest-cov>=7.1.0"]
+
 
 [tool.uv]
 
@@ -63,5 +64,5 @@ target-version = "py312"
 extend-select = ['I', 'TID']
 
 [build-system]
-requires = ["uv_build >= 0.9.21, < 0.12.0"]
+requires = ["uv_build >= 0.11.6, < 0.12.0"]
 build-backend = "uv_build"
