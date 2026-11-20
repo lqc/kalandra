@@ -1,6 +1,6 @@
 [project]
 name = "kalandra"
-version = "0.9.4"
+version = "0.9.5"
 description = ""
 readme = "README.md"
 license = { text = "Apache-2.0" }
