@@ -12,6 +12,8 @@ import pytest
 from aiohttp import web
 
 from kalandra.auth import NoopCredentialProvider
+from kalandra.commands.update_mirror import create_glob_filter, update_mirror
+from kalandra.transports.file import FileTransport
 from kalandra.transports.http import HTTPTransport
 
 pytestmark = pytest.mark.asyncio(loop_scope="module")
@@ -38,6 +40,7 @@ class GitServer:
         self._bare_repo_path = repo_path / ".git"
         self.git_executable = git_executable
         self.override_git_protocol = None
+        self.push_requests = 0
 
     async def init_repo(self):
         self.repo_path.mkdir(parents=True)
@@ -77,6 +80,9 @@ class GitServer:
             stdout=asyncio.subprocess.PIPE,
             env=git_cmd_env,
         )
+
+        if path == "git-receive-pack" and request.method == "POST":
+            self.push_requests += 1
 
         body = await request.read()
         logging.debug("[git-backend] request body: %r", body)
@@ -216,3 +222,30 @@ async def fetch_all(git_http_endpoint: str, tmp_path: Path):
 
         assert packfile_path.is_file(), "The packfile was not created"
         assert packfile_path.stat().st_size > 0, "The packfile is empty"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("old", "new"), [("foo/bar", "foo/bar/buzz"), ("foo/bar/buzz", "foo/bar")])
+async def test_sync_conflicting_branches_over_http(
+    git_http_endpoint: str, git_server: GitServer, tmp_path: Path, old: str, new: str
+):
+    source = tmp_path / "source.git"
+    git = git_server.git_executable
+    target = git_server.repo_path
+    await async_exec(git, "clone", "--bare", str(target), str(source))
+    await async_exec(git, "config", "http.receivepack", "true", cwd=target)
+    await async_exec(git, "branch", old, cwd=target)
+    await async_exec(git, "branch", new, cwd=source)
+
+    creds = NoopCredentialProvider()
+    upstream = FileTransport(url=source.as_uri(), credentials_provider=creds)
+    mirror = HTTPTransport(url=git_http_endpoint, credentials_provider=creds)
+    include = create_glob_filter("refs/heads/*", "refs/tags/*")
+    await update_mirror(upstream, mirror, include_filter=include)
+
+    assert git_server.push_requests == 2
+    target_refs, _ = await async_exec(git, "show-ref", cwd=target)
+    source_refs, _ = await async_exec(git, "show-ref", cwd=source)
+    assert target_refs == source_refs
+    assert await update_mirror(upstream, mirror, include_filter=include) == []
+    assert git_server.push_requests == 2

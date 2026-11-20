@@ -1,12 +1,13 @@
 import fnmatch
 import logging
 import re
-from typing import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Iterator
 
 import aiofiles
 
 from kalandra.gitprotocol import NULL_OBJECT_ID, Ref, RefChange
 from kalandra.transports import Transport
+from kalandra.transports.base import ServerError
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,22 @@ def create_glob_filter(*globs: str) -> Callable[[str], bool] | None:
     return filter_func
 
 
+def _ref_parents(ref: str) -> Iterator[str]:
+    while "/" in ref:
+        ref = ref.rsplit("/", 1)[0]
+        yield ref
+
+
+def _blocking_deletions(changes: list[RefChange]) -> list[RefChange]:
+    creates = {change.ref for change in changes if change.is_create}
+    create_parents = {parent for ref in creates for parent in _ref_parents(ref)}
+    return [
+        change
+        for change in changes
+        if change.is_delete and (change.ref in create_parents or any(p in creates for p in _ref_parents(change.ref)))
+    ]
+
+
 async def update_mirror(
     upstream: Transport,
     mirror: Transport,
@@ -103,11 +120,14 @@ async def update_mirror(
         if dry_run:
             return changes
 
+        blockers = _blocking_deletions(changes)
+        blocking_refs = {change.ref for change in blockers}
+
         # Fetch objects from upstream
         async with aiofiles.tempfile.NamedTemporaryFile(suffix=".pack", encoding=None) as packfile:
             new_objects = {change.new for change in changes}
             new_objects.discard(NULL_OBJECT_ID)
-            have_objects = set(mirror_conn.refs.values())
+            have_objects = {oid for ref, oid in mirror_conn.refs.items() if ref not in blocking_refs}
 
             if new_objects:
                 logger.info("Fetching objects from upstream")
@@ -124,6 +144,15 @@ async def update_mirror(
 
             # Push objects to mirror
             logger.info("Sending changes to mirror")
-            await mirror_conn.push_changes(changes, packfile)
+            if blockers:
+                logger.info("Deleting %d conflicting refs before creating their replacements", len(blockers))
+                await mirror_conn.push_changes(blockers, None)
+                async with mirror.push() as next_conn:
+                    remaining = blocking_refs.intersection(next_conn.refs)
+                    if remaining:
+                        raise ServerError(f"Conflicting refs still present on mirror: {', '.join(sorted(remaining))}")
+                    await next_conn.push_changes([c for c in changes if c.ref not in blocking_refs], packfile)
+            else:
+                await mirror_conn.push_changes(changes, packfile)
 
         return changes
