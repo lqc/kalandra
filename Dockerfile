@@ -22,7 +22,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=README.md,target=README.md \
     --mount=type=bind,source=src,target=src \
-    uv sync --locked --no-editable --extra github
+    uv sync --locked --no-build --no-install-project --extra github \
+ && uv build --wheel --no-build --out-dir /tmp/kalandra-wheel \
+ && uv pip install --no-build --no-deps /tmp/kalandra-wheel/*.whl \
+ && rm -r /tmp/kalandra-wheel
 
 # --- Final stage ---
 FROM python:3.14-slim-trixie

@@ -65,7 +65,6 @@ class FileConnection(BaseConnection["FileTransport"]):
             self.process.terminate()
         await self.process.wait()
 
-        self._err_task.cancel()
         await self._err_task
 
 
